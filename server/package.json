@@ -1,0 +1,14 @@
+{
+  "name": "manhunt",
+  "version": "1.0.0",
+  "description": "Echtes Manhunt-Spiel: Runner teilen ihren Standort und Fotos, Hunter jagen sie.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
+}

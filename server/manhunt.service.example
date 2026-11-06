@@ -1,0 +1,21 @@
+# Nur für den Betrieb OHNE Docker auf Linux: /etc/systemd/system/manhunt.service
+[Unit]
+Description=Manhunt
+After=network.target
+
+[Service]
+User=manhunt
+WorkingDirectory=/opt/manhunt
+EnvironmentFile=/opt/manhunt/.env
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+Environment=DATA_DIR=/var/lib/manhunt
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/manhunt
+
+[Install]
+WantedBy=multi-user.target

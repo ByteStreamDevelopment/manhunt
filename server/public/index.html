@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manhunt</title>
+  <meta name="theme-color" content="#14201a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="wrap hero">
+    <div class="chase" aria-hidden="true"><i class="h"></i><i class="h"></i><i class="h"></i><i class="r"></i></div>
+    <h1>Manhunt</h1>
+    <p>Runner sind unterwegs und teilen ihren Standort und Fotos. Hunter holen sie ein.</p>
+
+    <div class="card stack">
+      <div>
+        <label for="code">Spielcode</label>
+        <input id="code" class="code" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE">
+        <p class="err" id="err" role="alert"></p>
+      </div>
+      <button class="btn big" id="go">Beitreten</button>
+    </div>
+
+    <section id="recent" hidden>
+      <h2>Deine Spiele auf diesem Gerät</h2>
+      <ul class="plist" id="recentList"></ul>
+    </section>
+
+    <p class="small muted">Spielleitung? <a href="/admin">Hier Spiele anlegen und steuern.</a></p>
+  </main>
+  <script src="/common.js"></script>
+  <script src="/index.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manhunt – Spielleitung</title>
+  <meta name="theme-color" content="#14201a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/">Manhunt</a>
+    <span class="title">Spielleitung</span>
+    <button class="btn small light" id="logout" hidden>Abmelden</button>
+  </header>
+  <main class="wrap">
+    <section id="login" class="card stack" hidden>
+      <h2>Anmelden</h2>
+      <div>
+        <label for="pw">Admin-Passwort</label>
+        <input id="pw" type="password" autocomplete="current-password">
+        <p class="err" id="loginErr" role="alert"></p>
+      </div>
+      <button class="btn" id="loginBtn">Anmelden</button>
+    </section>
+
+    <section id="dash" hidden>
+      <details class="card" id="newWrap">
+        <summary>Neues Spiel anlegen</summary>
+        <div class="stack" style="margin-top:1rem">
+          <div>
+            <label for="newName">Name des Spiels</label>
+            <input id="newName" type="text" maxlength="40" value="Manhunt">
+          </div>
+          <div id="newForm"></div>
+          <p class="err" id="newErr" role="alert"></p>
+          <button class="btn" id="createBtn">Spiel anlegen</button>
+        </div>
+      </details>
+      <div id="games"></div>
+    </section>
+  </main>
+  <script src="/common.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>
