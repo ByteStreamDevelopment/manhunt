@@ -1,9 +1,16 @@
 package eu.nebendahl.manhunt
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,27 +37,38 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.CopyrightOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
+import kotlin.math.roundToInt
 
 private const val C_RUNNER = 0xFF2E9E5B.toInt()
 private const val C_HUNTER = 0xFFD64545.toInt()
 private const val C_SELF = 0xFF2F7BFF.toInt()
 private const val C_CAUGHT = 0xFF888888.toInt()
+private const val C_ZONE = 0xFFF2BC0F.toInt()
+
+/** Ein Spieler, auf den die Karte springen soll (vom Spieler-Tab aus). */
+data class MapFocus(val playerId: String, val nonce: Long = System.nanoTime())
 
 @Composable
-fun MapTab(st: GameState, serverNow: Long) {
+fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () -> Unit) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
+    val fix by GameRepository.myFix.collectAsState()
     val mapView = remember {
         MapView(ctx).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
+            isTilesScaledToDpi = true
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+            minZoomLevel = 3.0
+            maxZoomLevel = 19.0
             controller.setZoom(6.0)
             controller.setCenter(GeoPoint(51.1, 10.4))
         }
@@ -63,114 +82,216 @@ fun MapTab(st: GameState, serverNow: Long) {
             }
         }
         owner.lifecycle.addObserver(obs)
+        if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onResume()
         onDispose {
             owner.lifecycle.removeObserver(obs)
+            mapView.onPause()
             mapView.onDetach()
         }
     }
 
-    val me = st.players.firstOrNull { it.id == st.self.id }
+    // Nur neu zeichnen, wenn sich Daten ändern (nicht jede Sekunde), sonst schließen sich offene Infofenster.
+    // Veraltete Positionen werden über einen Minutentakt aktualisiert.
+    val minute = serverNow / 60_000
+    LaunchedEffect(st, fix, minute) { redraw(mapView, st, fix, serverNow) }
+
     var centered by remember { mutableStateOf(false) }
-    LaunchedEffect(me?.loc != null, st.players.count { it.loc != null }) {
-        if (!centered) {
-            val c = me?.loc?.let { GeoPoint(it.lat, it.lng) }
-                ?: st.players.firstNotNullOfOrNull { p -> p.loc?.let { GeoPoint(it.lat, it.lng) } }
-                ?: if (st.settings.zoneEnabled) GeoPoint(st.settings.zoneLat, st.settings.zoneLng) else null
-            if (c != null) {
-                mapView.controller.setZoom(16.0)
-                mapView.controller.setCenter(c)
-                centered = true
-            }
+    LaunchedEffect(st, fix) {
+        if (!centered) centered = fitAll(mapView, st, fix, auto = true)
+    }
+    LaunchedEffect(focus) {
+        val f = focus ?: return@LaunchedEffect
+        val p = st.players.firstOrNull { it.id == f.playerId }
+        val l = if (p != null && p.id == st.self.id) fix ?: p.loc else p?.loc
+        if (l != null) {
+            mapView.controller.setZoom(maxOf(mapView.zoomLevelDouble, 16.0))
+            mapView.controller.animateTo(GeoPoint(l.lat, l.lng))
+            centered = true
+            mapView.overlays.filterIsInstance<Marker>().firstOrNull { it.id == f.playerId }?.showInfoWindow()
         }
+        onFocusHandled()
     }
 
     Column(Modifier.fillMaxSize()) {
-        nearestRunnerText(st, me)?.let {
+        nearestRunnerText(st, fix, serverNow)?.let {
             Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
                 Text(it, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            AndroidView(
-                factory = { mapView },
-                modifier = Modifier.fillMaxSize(),
-                update = { redraw(it, st, serverNow) },
-            )
-            SmallFloatingActionButton(
-                onClick = { me?.loc?.let { mapView.controller.animateTo(GeoPoint(it.lat, it.lng)) } },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp),
-            ) { Text("⌖") }
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                SmallFloatingActionButton(onClick = {
+                    if (!fitAll(mapView, st, fix, auto = false)) Toast.makeText(ctx, "Noch keine Positionen zu sehen.", Toast.LENGTH_SHORT).show()
+                }) { Text("⤢") }
+                SmallFloatingActionButton(onClick = {
+                    val l = fix ?: st.me()?.loc
+                    if (l != null) {
+                        mapView.controller.setZoom(maxOf(mapView.zoomLevelDouble, 16.0))
+                        mapView.controller.animateTo(GeoPoint(l.lat, l.lng))
+                    } else {
+                        Toast.makeText(ctx, "Dein Standort ist noch nicht bekannt.", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("⌖") }
+            }
         }
     }
 }
 
-private fun nearestRunnerText(st: GameState, me: Player?): String? {
+/** Alle sichtbaren Positionen einpassen. Gibt true zurück, wenn es etwas zum Einpassen gab. */
+private fun fitAll(m: MapView, st: GameState, fix: Loc?, auto: Boolean): Boolean {
+    val pts = st.players.filter { it.id != st.self.id }.mapNotNull { it.loc }.map { GeoPoint(it.lat, it.lng) }.toMutableList()
+    (fix ?: st.me()?.loc)?.let { pts += GeoPoint(it.lat, it.lng) }
+    val s = st.settings
+    if (pts.isEmpty() && s.zoneEnabled) {
+        val box = Polygon.pointsAsCircle(GeoPoint(s.zoneLat, s.zoneLng), s.zoneRadiusM)
+        whenLaidOut(m) { m.zoomToBoundingBox(BoundingBox.fromGeoPointsSafe(box), !auto, 40) }
+        return true
+    }
+    if (pts.isEmpty()) return false
+    whenLaidOut(m) {
+        if (pts.size == 1) {
+            m.controller.setZoom(16.0)
+            m.controller.setCenter(pts[0])
+        } else {
+            m.zoomToBoundingBox(BoundingBox.fromGeoPointsSafe(pts).increaseByScale(1.3f), !auto, 60)
+            if (m.zoomLevelDouble > 17.0) m.controller.setZoom(17.0)
+        }
+    }
+    return true
+}
+
+private fun whenLaidOut(m: MapView, block: () -> Unit) {
+    if (m.width > 0 && m.height > 0) m.post(block)
+    else m.addOnFirstLayoutListener { _, _, _, _, _ -> block() }
+}
+
+private fun nearestRunnerText(st: GameState, fix: Loc?, serverNow: Long): String? {
     if (st.self.role != "hunter" || !st.settings.showDistance || st.game.status != "running") return null
-    val myLoc = me?.loc ?: return null
-    val best = st.players
-        .filter { it.role == "runner" && !it.caught && it.loc != null }
-        .minByOrNull { haversine(myLoc.lat, myLoc.lng, it.loc!!.lat, it.loc.lng) }
-        ?: return null
+    val cands = st.players.filter { it.role == "runner" && !it.caught && it.loc != null }
+    if (cands.isEmpty()) {
+        val rel = st.game.releaseAt
+        return if (rel != null && serverNow < rel) "Noch Vorsprung: die Runner sind noch nicht sichtbar." else "Noch kein Runner sichtbar."
+    }
+    val myLoc = fix ?: st.me()?.loc ?: return "Nächster Runner: warte auf dein GPS …"
+    val best = cands.minByOrNull { haversine(myLoc.lat, myLoc.lng, it.loc!!.lat, it.loc.lng) }!!
     val l = best.loc!!
     val d = haversine(myLoc.lat, myLoc.lng, l.lat, l.lng)
     val b = bearing(myLoc.lat, myLoc.lng, l.lat, l.lng)
-    return "Nächster Runner: ${best.name} · ${distText(d)} Richtung ${compass(b)}"
+    val approx = if (st.settings.fuzzMeters > 0) "ca. " else ""
+    return "Nächster Runner: ${best.name} · $approx${distTextRounded(d)} Richtung ${compassLong(b)} (Stand ${ago(serverNow - l.ts)})"
 }
 
-private fun dot(ctx: Context, color: Int, sizeDp: Int): Drawable {
+/** Punkt mit Namensschild darunter. */
+private fun pin(ctx: Context, color: Int, label: String, big: Boolean, faded: Boolean): Drawable {
     val d = ctx.resources.displayMetrics.density
-    val px = (sizeDp * d).toInt()
-    return GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(color)
-        setStroke((2 * d).toInt(), Color.WHITE)
-        setSize(px, px)
+    val r = (if (big) 11 else 9) * d
+    val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 12 * d
+        typeface = Typeface.DEFAULT_BOLD
+        this.color = Color.WHITE
+        textAlign = Paint.Align.CENTER
     }
+    val tw = text.measureText(label)
+    val padX = 5 * d
+    val labelH = 17 * d
+    val w = maxOf(2 * r + 4 * d, tw + 2 * padX).roundToInt()
+    // Punkt in der Mitte der Grafik, Schild darunter -> Anker bleibt mittig auf dem Punkt
+    val h = ((r + 2 * d) * 2 + 2 * (labelH + 3 * d)).roundToInt()
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val cx = w / 2f
+    val cy = h / 2f
+    val alpha = if (faded) 140 else 255
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; this.alpha = alpha }
+    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2.5f * d; this.alpha = alpha
+    }
+    c.drawCircle(cx, cy, r, fill)
+    c.drawCircle(cx, cy, r, stroke)
+    if (label.isNotEmpty()) {
+        val top = cy + r + 3 * d
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.argb(if (faded) 120 else 190, 0, 0, 0) }
+        c.drawRoundRect(cx - tw / 2 - padX, top, cx + tw / 2 + padX, top + labelH, 6 * d, 6 * d, bg)
+        c.drawText(label, cx, top + labelH - 5 * d, text)
+    }
+    return BitmapDrawable(ctx.resources, bmp)
 }
 
-private fun redraw(m: MapView, st: GameState, serverNow: Long) {
-    val ctx = m.context
-    m.overlays.clear()
-    val s = st.settings
-    if (s.zoneEnabled) {
-        m.overlays.add(
-            Polygon(m).apply {
-                points = Polygon.pointsAsCircle(GeoPoint(s.zoneLat, s.zoneLng), s.zoneRadiusM)
-                fillPaint.color = Color.argb(28, 255, 170, 0)
-                outlinePaint.color = Color.rgb(255, 170, 0)
-                outlinePaint.strokeWidth = 4f
-            },
-        )
+private fun circle(m: MapView, center: GeoPoint, radius: Double, color: Int, fillAlpha: Int, dashed: Boolean = false) =
+    Polygon(m).apply {
+        points = Polygon.pointsAsCircle(center, radius)
+        fillPaint.color = Color.argb(fillAlpha, Color.red(color), Color.green(color), Color.blue(color))
+        outlinePaint.color = color
+        outlinePaint.strokeWidth = if (dashed) 6f else 2f
+        if (dashed) outlinePaint.pathEffect = DashPathEffect(floatArrayOf(30f, 20f), 0f)
+        setOnClickListener { _, _, _ -> false }
+        infoWindow = null
     }
+
+private fun redraw(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
+    val ctx = m.context
+    val openId = m.overlays.filterIsInstance<Marker>().firstOrNull { it.isInfoWindowShown }?.id
+    m.overlays.forEach { if (it is Marker) it.closeInfoWindow() }
+    m.overlays.clear()
+    m.overlays.add(CopyrightOverlay(ctx))
+    val s = st.settings
+    val ended = st.game.status == "ended"
+    if (s.zoneEnabled) m.overlays.add(circle(m, GeoPoint(s.zoneLat, s.zoneLng), s.zoneRadiusM, C_ZONE, 18, dashed = true))
+
     fun colorOf(p: Player) = when {
         p.id == st.self.id -> C_SELF
         p.caught -> C_CAUGHT
         p.role == "runner" -> C_RUNNER
         else -> C_HUNTER
     }
+    val fuzzed = { p: Player -> s.fuzzMeters > 0 && st.self.role == "hunter" && p.role == "runner" && !ended }
+
     for (p in st.players) {
         if (p.trail.size > 1) {
             m.overlays.add(
                 Polyline(m).apply {
                     setPoints(p.trail.map { GeoPoint(it.lat, it.lng) })
                     outlinePaint.color = colorOf(p)
-                    outlinePaint.strokeWidth = 5f
-                    outlinePaint.alpha = 140
+                    outlinePaint.strokeWidth = 6f
+                    outlinePaint.alpha = 150
+                    infoWindow = null
                 },
             )
         }
     }
+    val markers = mutableListOf<Marker>()
     for (p in st.players) {
-        val l = p.loc ?: continue
-        m.overlays.add(
-            Marker(m).apply {
-                position = GeoPoint(l.lat, l.lng)
-                title = p.name + if (p.caught) " (gefangen)" else ""
-                snippet = ago(serverNow - l.ts) + if (l.acc > 0) " · ±${l.acc.toInt()} m" else ""
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                icon = dot(ctx, colorOf(p), if (p.id == st.self.id) 22 else 18)
-            },
-        )
+        val isSelf = p.id == st.self.id
+        // Eigene Position bevorzugt direkt vom GPS dieses Handys
+        val l = if (isSelf) fix ?: p.loc else p.loc
+        l ?: continue
+        val stale = st.game.status == "running" && !isSelf && serverNow - l.ts > s.locationIntervalSec * 2_500L + 30_000L
+        val gp = GeoPoint(l.lat, l.lng)
+        if (fuzzed(p)) m.overlays.add(circle(m, gp, s.fuzzMeters.toDouble(), colorOf(p), 22))
+        if (isSelf && l.acc > 0) m.overlays.add(circle(m, gp, l.acc, C_SELF, 20))
+        markers += Marker(m).apply {
+            id = p.id
+            position = gp
+            title = p.name + (if (isSelf) " (du)" else "") + " · " + roleName(p.role)
+            val info = mutableListOf<String>()
+            if (p.caught) info += "gefangen"
+            if (p.outside) info += "außerhalb der Spielzone"
+            info += "Stand: " + ago((if (isSelf && fix != null) System.currentTimeMillis() else serverNow) - l.ts)
+            if (l.acc > 0) info += (if (fuzzed(p)) "ungenau, bis ±" else "Genauigkeit ±") + "${l.acc.roundToInt()} m"
+            snippet = info.joinToString("\n")
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0.3f)
+            icon = pin(ctx, colorOf(p), if (isSelf) "Ich" else p.name, isSelf, stale)
+        }
     }
+    // Eigener Marker zuletzt -> liegt oben
+    markers.sortBy { it.id == st.self.id }
+    m.overlays.addAll(markers)
+    markers.firstOrNull { it.id == openId }?.showInfoWindow()
     m.invalidate()
 }

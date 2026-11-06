@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -29,15 +30,25 @@ import kotlinx.coroutines.launch
 
 /**
  * Läuft im Vordergrund, solange man in einem Spiel ist: sendet den Standort im Intervall der Spielleitung
- * (auch bei gesperrtem Display) und erinnert Runner per Benachrichtigung ans Foto.
+ * (auch bei gesperrtem Display), erinnert Runner ans Foto und meldet Spielereignisse per Benachrichtigung.
  */
 class TrackingService : Service() {
 
     companion object {
-        fun start(ctx: Context) {
-            val granted = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        private const val TAG = "TrackingService"
+
+        fun hasLocationPermission(ctx: Context) =
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
                 .any { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
-            if (granted) ContextCompat.startForegroundService(ctx, Intent(ctx, TrackingService::class.java))
+
+        fun start(ctx: Context) {
+            if (!hasLocationPermission(ctx)) return
+            try {
+                ContextCompat.startForegroundService(ctx, Intent(ctx, TrackingService::class.java))
+            } catch (e: Exception) {
+                // z. B. ForegroundServiceStartNotAllowedException, wenn die App im Hintergrund ist
+                Log.w(TAG, "Dienst konnte nicht gestartet werden", e)
+            }
         }
 
         fun stop(ctx: Context) {
@@ -52,6 +63,11 @@ class TrackingService : Service() {
     private var wake: PowerManager.WakeLock? = null
     private var lastText = ""
     private var lastReminder = 0L
+    private var alarmShown = false
+
+    // Für Ereignis-Benachrichtigungen
+    private var seenMsgs: MutableSet<String>? = null
+    private var seenPhotos: MutableSet<String>? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,12 +77,17 @@ class TrackingService : Service() {
         Notif.createChannels(this)
         fused = LocationServices.getFusedLocationProviderClient(this)
         lastText = "Manhunt läuft"
-        ServiceCompat.startForeground(
-            this, Notif.ID_TRACK, Notif.ongoing(this, lastText),
-            if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
-        )
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "manhunt:tracking").apply { acquire(8 * 60 * 60 * 1000L) }
+        try {
+            ServiceCompat.startForeground(
+                this, Notif.ID_TRACK, Notif.ongoing(this, lastText),
+                if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
+            )
+        } catch (e: Exception) {
+            // Android 14+: Standort-Vordergrunddienst darf ohne Hintergrund-Standort nicht aus dem Hintergrund starten.
+            Log.w(TAG, "startForeground nicht erlaubt", e)
+            stopSelf()
+            return
+        }
 
         scope.launch { GameRepository.session.collect { if (it == null) stopSelf() } }
         scope.launch { GameRepository.state.collect { handleState(it) } }
@@ -96,17 +117,49 @@ class TrackingService : Service() {
 
     private fun handleState(st: GameState?) {
         if (st == null) return
+        notifyEvents(st)
         when {
             st.game.status == "ended" -> {
                 stopLocation()
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                Notif.cancelPhotoAlarm(this)
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
             st.game.status == "lobby" -> { stopLocation(); setText("Warte auf den Spielstart") }
-            st.self.caught -> { stopLocation(); setText("Du wurdest gefangen") }
+            st.self.caught -> { stopLocation(); Notif.cancelPhotoAlarm(this); setText("Du wurdest gefangen") }
             else -> {
-                setText("Standort wird geteilt")
-                ensureLocation(st.settings.locationIntervalSec * 1000L)
+                setText(if (st.shouldShare()) "Standort wird geteilt" else "Spiel läuft – dein Standort wird nicht geteilt")
+                // Für Runner gilt das Intervall der Spielleitung; die eigene Position auf der Karte
+                // soll trotzdem nicht zu alt sein (max. 30 s).
+                val interval = minOf(st.settings.locationIntervalSec * 1000L, 30_000L)
+                ensureLocation(interval)
+            }
+        }
+    }
+
+    /** Neue Meldungen und Fotos als Benachrichtigung zeigen. */
+    private fun notifyEvents(st: GameState) {
+        val msgs = seenMsgs
+        val photos = seenPhotos
+        if (msgs == null || photos == null) {
+            seenMsgs = st.messages.map { it.id }.toMutableSet()
+            seenPhotos = st.photos.map { it.id }.toMutableSet()
+            return
+        }
+        if (st.game.status == "lobby" && st.messages.isEmpty()) { msgs.clear(); photos.clear() }
+        for (m in st.messages) {
+            if (!msgs.add(m.id)) continue
+            when {
+                m.kind == "admin" -> Notif.event(this, "📣 Spielleitung", m.text)
+                m.text.contains("beigetreten") -> {} // in der Lobby zu viel Rauschen
+                else -> Notif.event(this, st.game.name, m.text)
+            }
+        }
+        for (ph in st.photos) {
+            if (!photos.add(ph.id)) continue
+            if (st.self.role != "runner" && ph.pid != st.self.id) {
+                val name = st.players.firstOrNull { it.id == ph.pid }?.name ?: "einem Runner"
+                Notif.event(this, "Neues Foto", "Neues Foto von $name")
             }
         }
     }
@@ -115,48 +168,62 @@ class TrackingService : Service() {
     private fun ensureLocation(intervalMs: Long) {
         if (callback != null && currentIntervalMs == intervalMs) return
         stopLocation()
-        val granted = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            .any { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
-        if (!granted) return
+        if (!hasLocationPermission(this)) return
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
-            .setMinUpdateIntervalMillis(intervalMs)
+            .setMinUpdateIntervalMillis(intervalMs / 2)
+            .setWaitForAccurateLocation(false)
             .build()
         val cb = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val l = result.lastLocation ?: return
-                GameRepository.sendLocation(l.latitude, l.longitude, l.accuracy.toDouble())
+                GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble())
             }
+        }
+        try {
+            fused.requestLocationUpdates(req, cb, Looper.getMainLooper())
+            // Sofort eine Position holen, damit nicht erst ein ganzes Intervall vergeht
+            fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).addOnSuccessListener { l ->
+                if (l != null) GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble())
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Keine Standortberechtigung", e)
+            return
         }
         callback = cb
         currentIntervalMs = intervalMs
-        fused.requestLocationUpdates(req, cb, Looper.getMainLooper())
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (wake?.isHeld != true) {
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "manhunt:tracking").apply { acquire(12 * 60 * 60 * 1000L) }
+        }
     }
 
     private fun stopLocation() {
         callback?.let { fused.removeLocationUpdates(it) }
         callback = null
         currentIntervalMs = -1L
+        wake?.let { if (it.isHeld) it.release() }
+        wake = null
     }
 
     private fun reminderTick() {
         val st = GameRepository.state.value ?: return
-        val s = st.settings
-        if (st.game.status != "running" || st.self.role != "runner" || st.self.caught || !s.photosEnabled) return
-        val started = st.game.startedAt ?: return
-        val me = st.players.firstOrNull { it.id == st.self.id }
-        val base = maxOf(me?.lastPhotoTs ?: 0L, started)
-        val due = base + s.photoIntervalMin * 60_000L
         val serverNow = System.currentTimeMillis() + GameRepository.clockOffset
-        if (serverNow >= due && System.currentTimeMillis() - lastReminder > 60_000) {
-            lastReminder = System.currentTimeMillis()
-            Notif.photoAlarm(this)
+        val due = st.photoDue(serverNow, GameRepository.localLastPhoto.value)
+        if (due?.overdue == true) {
+            if (System.currentTimeMillis() - lastReminder > 60_000) {
+                lastReminder = System.currentTimeMillis()
+                alarmShown = true
+                Notif.photoAlarm(this)
+            }
+        } else if (alarmShown) {
+            alarmShown = false
+            Notif.cancelPhotoAlarm(this)
         }
     }
 
     override fun onDestroy() {
         stopLocation()
         scope.cancel()
-        wake?.let { if (it.isHeld) it.release() }
         super.onDestroy()
     }
 }

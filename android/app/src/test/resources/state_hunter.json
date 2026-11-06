@@ -1,0 +1,118 @@
+{
+    "now": 1794006219018,
+    "game": {
+        "code": "X462L",
+        "name": "Test",
+        "status": "running",
+        "startedAt": 1794006218965,
+        "endedAt": null,
+        "releaseAt": 1794006218965
+    },
+    "settings": {
+        "locationIntervalSec": 120,
+        "headStartMin": 0,
+        "autoEndAfterMin": 0,
+        "showTrail": true,
+        "fuzzMeters": 100,
+        "huntersVisibleToHunters": true,
+        "huntersVisibleToRunners": false,
+        "runnersVisibleToRunners": true,
+        "showDistance": true,
+        "photosEnabled": true,
+        "photoIntervalMin": 1,
+        "caughtEnabled": true,
+        "autoEndWhenAllCaught": true,
+        "zoneEnabled": true,
+        "zoneLat": 52.5,
+        "zoneLng": 13.4,
+        "zoneRadiusM": 1000
+    },
+    "self": {
+        "id": "bf0b88ef",
+        "name": "Hans",
+        "role": "hunter",
+        "caught": false,
+        "lastLocTs": 1794006218986
+    },
+    "players": [
+        {
+            "id": "4d160bd1",
+            "name": "Rita",
+            "role": "runner",
+            "caught": false,
+            "hidden": false,
+            "loc": {
+                "lat": 52.50974461999643,
+                "lng": 13.409424296198836,
+                "acc": 100,
+                "ts": 1794006218972
+            },
+            "trail": [
+                [
+                    52.50974461999643,
+                    13.409424296198836,
+                    1794006218972
+                ]
+            ],
+            "outside": true,
+            "photoCount": 1,
+            "lastPhotoTs": 1794006219003
+        },
+        {
+            "id": "bf0b88ef",
+            "name": "Hans",
+            "role": "hunter",
+            "caught": false,
+            "hidden": false,
+            "loc": {
+                "lat": 52.5,
+                "lng": 13.4,
+                "acc": 5,
+                "ts": 1794006218986
+            },
+            "trail": [
+                [
+                    52.5,
+                    13.4,
+                    1794006218986
+                ]
+            ],
+            "outside": false,
+            "photoCount": 0,
+            "lastPhotoTs": null
+        }
+    ],
+    "photos": [
+        {
+            "id": "78f9286f30a5",
+            "pid": "4d160bd1",
+            "ts": 1794006219003
+        }
+    ],
+    "messages": [
+        {
+            "id": "944315",
+            "ts": 1794006218899,
+            "text": "Rita ist als Runner beigetreten.",
+            "kind": "system"
+        },
+        {
+            "id": "260ec4",
+            "ts": 1794006218930,
+            "text": "Hans ist als Hunter beigetreten.",
+            "kind": "system"
+        },
+        {
+            "id": "82cf6c",
+            "ts": 1794006218965,
+            "text": "Das Spiel l\u00e4uft!",
+            "kind": "system"
+        },
+        {
+            "id": "dc7c45",
+            "ts": 1794006219009,
+            "text": "Hallo zusammen",
+            "kind": "admin"
+        }
+    ]
+}

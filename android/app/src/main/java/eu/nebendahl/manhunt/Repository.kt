@@ -27,6 +27,12 @@ object GameRepository {
     val state = MutableStateFlow<GameState?>(null)
     val error = MutableStateFlow<String?>(null)
     val lastSentAt = MutableStateFlow<Long?>(null)
+    /** Letzte eigene GPS-Position dieses Handys (auch wenn sie nicht gesendet wird). */
+    val myFix = MutableStateFlow<Loc?>(null)
+    /** Zeitpunkt des letzten erfolgreichen Foto-Uploads (Server-Zeit), bis der Zustand nachgeladen ist. */
+    val localLastPhoto = MutableStateFlow(0L)
+    @Volatile private var nextSendAt = 0L
+    @Volatile private var sending = false
 
     /** Server-Zeit minus lokale Zeit (ms). */
     @Volatile var clockOffset = 0L
@@ -44,20 +50,30 @@ object GameRepository {
 
     fun setSession(s: Session) {
         prefs?.edit()?.putString("code", s.code)?.putString("token", s.token)?.putString("id", s.playerId)
-            ?.putString("name", s.name)?.putString("role", s.role)?.apply()
+            ?.putString("name", s.name)?.putString("role", s.role)?.putString("lastName", s.name)?.apply()
         session.value = s
         state.value = null
         error.value = null
         lastSentAt.value = null
+        myFix.value = null
+        localLastPhoto.value = 0L
+        nextSendAt = 0L
         connect()
     }
 
+    /** Zuletzt benutzter Spielername (bleibt nach dem Verlassen erhalten). */
+    fun lastName(): String = prefs?.getString("lastName", "") ?: ""
+
     fun leave() {
         job?.cancel(); job = null
-        prefs?.edit()?.clear()?.apply()
+        val name = lastName().ifBlank { session.value?.name.orEmpty() }
+        prefs?.edit()?.clear()?.putString("lastName", name)?.apply()
         session.value = null
         state.value = null
         lastSentAt.value = null
+        myFix.value = null
+        localLastPhoto.value = 0L
+        nextSendAt = 0L
     }
 
     fun ensureConnected() { if (job?.isActive != true) connect() }
@@ -103,6 +119,10 @@ object GameRepository {
     private fun refresh(s: Session) {
         val st = Api.state(s.code, s.token)
         clockOffset = st.now - System.currentTimeMillis()
+        val prev = state.value
+        if (prev != null && (prev.game.status != st.game.status ||
+                prev.settings.locationIntervalSec != st.settings.locationIntervalSec)) nextSendAt = 0L
+        if (st.game.status == "lobby") localLastPhoto.value = 0L
         state.value = st
         error.value = null
     }
@@ -126,26 +146,39 @@ object GameRepository {
         }
     }
 
-    fun sendLocation(lat: Double, lng: Double, acc: Double) {
+    /** Neue GPS-Position vom Standort-Dienst. Gesendet wird nur, wenn die Spielregeln es verlangen. */
+    fun onFix(lat: Double, lng: Double, acc: Double) {
+        myFix.value = Loc(lat, lng, acc, System.currentTimeMillis())
         val s = session.value ?: return
+        val st = state.value ?: return
+        if (!st.shouldShare() || sending || System.currentTimeMillis() < nextSendAt) return
+        sending = true
         scope.launch {
             try {
-                Api.postLocation(s.code, s.token, lat, lng, acc)
-                lastSentAt.value = System.currentTimeMillis()
+                val next = Api.postLocation(s.code, s.token, lat, lng, acc)
+                if (next.ok) lastSentAt.value = System.currentTimeMillis()
+                // Etwas früher wieder senden dürfen, damit das Intervall nicht durch GPS-Verzögerung wächst
+                nextSendAt = System.currentTimeMillis() + (next.nextInMs * 0.85).toLong()
             } catch (e: ApiException) {
-                if (e.status == 401 || e.status == 404) onFailure(e)
+                if (e.status == 401 || e.status == 404) onFailure(e) else nextSendAt = System.currentTimeMillis() + 8_000
+            } finally {
+                sending = false
             }
         }
     }
 
     suspend fun markCaught(playerId: String, caught: Boolean) {
         val s = session.value ?: return
-        withContext(Dispatchers.IO) { Api.setCaught(s.code, s.token, playerId, caught); refresh(s) }
+        withContext(Dispatchers.IO) { Api.setCaught(s.code, s.token, playerId, caught); runCatching { refresh(s) } }
     }
 
     suspend fun uploadPhoto(jpeg: ByteArray) {
         val s = session.value ?: return
-        withContext(Dispatchers.IO) { Api.uploadPhoto(s.code, s.token, jpeg); refresh(s) }
+        withContext(Dispatchers.IO) {
+            Api.uploadPhoto(s.code, s.token, jpeg)
+            localLastPhoto.value = System.currentTimeMillis() + clockOffset
+            runCatching { refresh(s) }
+        }
     }
 
     private val photoCache = object : LruCache<String, Bitmap>(32 * 1024) {

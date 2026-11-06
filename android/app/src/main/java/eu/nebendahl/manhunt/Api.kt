@@ -38,7 +38,11 @@ object Api {
 
     private fun json(req: Request): JSONObject {
         val b = call(req)
-        return if (b.isEmpty()) JSONObject() else JSONObject(String(b))
+        return try {
+            if (b.isEmpty()) JSONObject() else JSONObject(String(b))
+        } catch (e: org.json.JSONException) {
+            throw ApiException(0, "Ungültige Antwort vom Server")
+        }
     }
 
     private fun get(path: String, token: String? = null): Request =
@@ -59,8 +63,11 @@ object Api {
 
     fun state(code: String, token: String): GameState = parseState(json(get("/api/g/$code/state", token)))
 
-    fun postLocation(code: String, token: String, lat: Double, lng: Double, acc: Double) {
-        json(post("/api/g/$code/location", token, JSONObject().put("lat", lat).put("lng", lng).put("acc", acc)))
+    data class LocResult(val ok: Boolean, val nextInMs: Long)
+
+    fun postLocation(code: String, token: String, lat: Double, lng: Double, acc: Double): LocResult {
+        val r = json(post("/api/g/$code/location", token, JSONObject().put("lat", lat).put("lng", lng).put("acc", acc)))
+        return LocResult(r.optBoolean("ok", true), r.optLong("nextInMs", 10_000L).coerceAtLeast(5_000L))
     }
 
     fun uploadPhoto(code: String, token: String, jpeg: ByteArray) {

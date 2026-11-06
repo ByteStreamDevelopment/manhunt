@@ -31,11 +31,30 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
+      # Optional: Secrets MANHUNT_KEYSTORE_BASE64 (base64 von keystore/manhunt.jks) und
+      # MANHUNT_KEYSTORE_PASSWORD anlegen. Ohne sie wird mit einem Debug-Schlüssel signiert
+      # (dann lässt sich die APK nicht als Update über eine mit build.sh gebaute installieren).
+      - name: Signierschlüssel bereitstellen
+        env:
+          KS_B64: ${{ secrets.MANHUNT_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.MANHUNT_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            mkdir -p keystore
+            echo "$KS_B64" | base64 -d > keystore/manhunt.jks
+            printf 'storeFile=keystore/manhunt.jks\nstorePassword=%s\nkeyAlias=manhunt\nkeyPassword=%s\n' "$KS_PASS" "$KS_PASS" > keystore.properties
+          else
+            echo "Kein Schlüssel hinterlegt – signiere mit Debug-Schlüssel."
+          fi
+
+      - name: Tests
+        run: gradle --no-daemon testDebugUnitTest
+
       - name: APK bauen
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleRelease
 
       - name: APK als Artefakt speichern
         uses: actions/upload-artifact@v3
         with:
           name: manhunt-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk

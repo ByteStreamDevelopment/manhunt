@@ -29,6 +29,9 @@ data class Settings(
     val showTrail: Boolean,
     val fuzzMeters: Int,
     val showDistance: Boolean,
+    val huntersVisibleToHunters: Boolean,
+    val huntersVisibleToRunners: Boolean,
+    val runnersVisibleToRunners: Boolean,
     val photosEnabled: Boolean,
     val photoIntervalMin: Int,
     val caughtEnabled: Boolean,
@@ -132,6 +135,9 @@ fun parseState(j: JSONObject): GameState {
             showTrail = s.optBoolean("showTrail", true),
             fuzzMeters = s.optInt("fuzzMeters", 0),
             showDistance = s.optBoolean("showDistance", true),
+            huntersVisibleToHunters = s.optBoolean("huntersVisibleToHunters", true),
+            huntersVisibleToRunners = s.optBoolean("huntersVisibleToRunners", false),
+            runnersVisibleToRunners = s.optBoolean("runnersVisibleToRunners", true),
             photosEnabled = s.optBoolean("photosEnabled", true),
             photoIntervalMin = s.optInt("photoIntervalMin", 15),
             caughtEnabled = s.optBoolean("caughtEnabled", true),
@@ -146,3 +152,45 @@ fun parseState(j: JSONObject): GameState {
         messages = j.getJSONArray("messages").objects().map { Msg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) },
     )
 }
+
+/* ------------------------------------------------------------------ */
+/* Abgeleitete Spiellogik (identisch zur Web-Version)                  */
+/* ------------------------------------------------------------------ */
+
+fun GameState.me(): Player? = players.firstOrNull { it.id == self.id }
+
+/** Soll das Handy den eigenen Standort an den Server schicken? */
+fun GameState.shouldShare(): Boolean =
+    game.status == "running" && !self.caught && self.role != "admin" &&
+        (self.role == "runner" || settings.huntersVisibleToHunters || settings.huntersVisibleToRunners)
+
+/** Braucht die App überhaupt GPS (Teilen oder eigene Position/Entfernung anzeigen)? */
+fun GameState.needsGps(): Boolean = game.status == "running" && !self.caught && self.role != "admin"
+
+data class PhotoDue(val overdue: Boolean, val prevDue: Long, val nextDue: Long)
+
+/**
+ * Foto-Runden laufen fest im Takt ab Spielstart (wie auf der Website):
+ * Runde n beginnt bei startedAt + n * Intervall. Überfällig, wenn seit Beginn der aktuellen Runde noch kein Foto kam.
+ */
+fun GameState.photoDue(serverNow: Long, localLastPhoto: Long = 0L): PhotoDue? {
+    val s = settings
+    if (self.role != "runner" || !s.photosEnabled || game.status != "running" || self.caught) return null
+    val started = game.startedAt ?: return null
+    val iv = s.photoIntervalMin * 60_000L
+    val slot = ((serverNow - started) / iv).coerceAtLeast(0)
+    val prevDue = started + slot * iv
+    val nextDue = prevDue + iv
+    val last = maxOf(me()?.lastPhotoTs ?: 0L, localLastPhoto)
+    return PhotoDue(slot >= 1 && last < prevDue, prevDue, nextDue)
+}
+
+/** Nächste Foto-Runde (für Hunter-Anzeige). */
+fun GameState.nextPhotoRound(serverNow: Long): Long? {
+    val started = game.startedAt ?: return null
+    if (!settings.photosEnabled || game.status != "running") return null
+    val iv = settings.photoIntervalMin * 60_000L
+    return started + (((serverNow - started) / iv).coerceAtLeast(0) + 1) * iv
+}
+
+fun roleName(r: String) = when (r) { "runner" -> "Runner"; "hunter" -> "Hunter"; "admin" -> "Spielleitung"; else -> r }

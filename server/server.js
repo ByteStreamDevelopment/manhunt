@@ -497,8 +497,20 @@ const CSP = [
   "base-uri 'self'",
 ].join('; ');
 
+// Android-App-Links: Einladungslinks /g/CODE öffnen direkt die App, wenn deren Signatur-Fingerabdruck
+// (SHA-256, mehrere mit Komma getrennt) in ANDROID_CERT_SHA256 steht.
+const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE || 'eu.nebendahl.manhunt';
+const ANDROID_CERTS = String(process.env.ANDROID_CERT_SHA256 || '').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+
 async function serveStatic(req, res, url) {
   if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Methode nicht erlaubt');
+  if (url.pathname === '/.well-known/assetlinks.json') {
+    if (!ANDROID_CERTS.length) throw new HttpError(404, 'Nicht gefunden');
+    return sendJSON(res, 200, [{
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: { namespace: 'android_app', package_name: ANDROID_PACKAGE, sha256_cert_fingerprints: ANDROID_CERTS },
+    }]);
+  }
   let p = decodeURIComponent(url.pathname);
   if (p === '/') p = '/index.html';
   else if (p === '/admin') p = '/admin.html';

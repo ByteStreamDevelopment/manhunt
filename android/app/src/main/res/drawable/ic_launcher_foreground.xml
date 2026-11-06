@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fadenkreuz mit Läufer-Punkt: 108x108, sichtbarer Bereich ca. 66x66 in der Mitte -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Ring -->
+    <path android:fillColor="#00000000" android:strokeColor="#5BD68A" android:strokeWidth="5"
+        android:pathData="M54,30a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <!-- Fadenkreuz-Striche -->
+    <path android:fillColor="#5BD68A" android:pathData="M51.5,22h5v14h-5z" />
+    <path android:fillColor="#5BD68A" android:pathData="M51.5,72h5v14h-5z" />
+    <path android:fillColor="#5BD68A" android:pathData="M22,51.5h14v5h-14z" />
+    <path android:fillColor="#5BD68A" android:pathData="M72,51.5h14v5h-14z" />
+    <!-- Ziel-Punkt -->
+    <path android:fillColor="#D64545" android:strokeColor="#FFFFFF" android:strokeWidth="2.5"
+        android:pathData="M54,46a8,8 0,1 1,0 16a8,8 0,1 1,0 -16z" />
+</vector>
