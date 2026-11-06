@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manhunt</title>
+  <meta name="theme-color" content="#14201a">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/">Manhunt</a>
+    <span class="title" id="gameName"></span>
+    <span class="pill" id="roleChip" hidden></span>
+    <span class="pill" id="statusPill" hidden></span>
+  </header>
+  <div id="banner" aria-live="assertive"></div>
+
+  <main id="joinView" class="wrap" hidden></main>
+
+  <div id="app" class="game-grid" hidden>
+    <div class="mapwrap">
+      <div id="map" role="application" aria-label="Karte"></div>
+      <div class="mapbtns">
+        <button class="btn small light" id="fitBtn">Alle zeigen</button>
+        <button class="btn small light" id="meBtn">Ich</button>
+      </div>
+    </div>
+    <div class="dock">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabbtn-lage" data-tab="lage" aria-selected="true">Lage</button>
+        <button role="tab" id="tabbtn-players" data-tab="players" aria-selected="false">Spieler</button>
+        <button role="tab" id="tabbtn-photos" data-tab="photos" aria-selected="false">Fotos</button>
+      </div>
+      <section id="tab-lage" role="tabpanel"></section>
+      <section id="tab-players" role="tabpanel" hidden></section>
+      <section id="tab-photos" role="tabpanel" hidden></section>
+    </div>
+  </div>
+
+  <dialog id="lightbox">
+    <img id="lbImg" alt="">
+    <div class="row between"><span id="lbCap"></span><button class="btn small" id="lbClose">Schließen</button></div>
+  </dialog>
+  <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/common.js"></script>
+  <script src="/game.js"></script>
+</body>
+</html>

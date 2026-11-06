@@ -1,0 +1,20 @@
+services:
+  manhunt:
+    build: .
+    container_name: manhunt
+    restart: unless-stopped
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Bitte ADMIN_PASSWORD in der .env setzen}
+      TZ: Europe/Berlin
+    volumes:
+      - manhunt-data:/data
+    networks:
+      - caddy
+
+networks:
+  caddy:
+    external: true
+    name: caddy   # <- Name des Docker-Netzwerks, in dem dein Caddy-Container hängt
+
+volumes:
+  manhunt-data:

@@ -1,0 +1,14 @@
+# In deine bestehende Caddyfile einfügen.
+# Variante A: Caddy und Manhunt laufen beide in Docker im selben Netzwerk
+manhunt.nebendahl.eu {
+	reverse_proxy manhunt:3000
+}
+
+# Variante B: Manhunt läuft direkt auf dem Host (ohne Docker), Caddy in Docker
+# (im Container von Caddy zusätzlich: extra_hosts: ["host.docker.internal:host-gateway"])
+# manhunt.nebendahl.eu {
+# 	reverse_proxy host.docker.internal:3000
+# }
+
+# Hinweis: Kein "encode" für diese Domain einschalten. Die Live-Updates (Server-Sent Events)
+# laufen sonst evtl. verzögert. Die Datenmengen sind ohnehin winzig.
