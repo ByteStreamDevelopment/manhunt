@@ -33,6 +33,7 @@
     ] },
     { group: 'Fähigkeiten', items: [
       { k: 'abilitiesEnabled', t: 'bool', label: 'Fähigkeiten an' },
+      { k: 'freezeImmunitySec', t: 'num', label: 'Nach einem Freeze sind Hunter so lange immun (Sekunden)', hint: 'Verhindert Dauer-Freeze durch mehrere Runner hintereinander.' },
       { k: 'abilities', t: 'abilities' },
     ] },
     { group: 'Fähigkeiten auf der Karte (Pickups)', items: [
@@ -47,6 +48,7 @@
     ] },
     { group: 'Spielende', items: [
       { k: 'caughtEnabled', t: 'bool', label: '„Gefangen“-Funktion (Hunter markieren Runner als gefangen)' },
+      { k: 'caughtBecomeHunter', t: 'bool', label: 'Gefangene Runner spielen automatisch als Hunter weiter' },
       { k: 'autoEndWhenAllCaught', t: 'bool', label: 'Spiel endet, sobald alle Runner gefangen sind' },
       { k: 'autoEndAfterMin', t: 'num', label: 'Spiel endet automatisch nach (Minuten)', hint: '0 = kein Zeitlimit. Bei Zeitablauf gewinnen die Runner.' },
     ] },
@@ -56,6 +58,12 @@
       { k: 'zoneLng', t: 'num', step: 'any', label: 'Mittelpunkt: Längengrad' },
       { k: 'zoneRadiusM', t: 'num', label: 'Radius (Meter)' },
       { k: '_here', t: 'button', label: 'Meinen aktuellen Standort als Mittelpunkt übernehmen' },
+    ] },
+    { group: 'Chat und Zuschauer', items: [
+      { k: 'chatEnabled', t: 'bool', label: 'Team-Chat (jedes Team sieht nur seinen eigenen Chat)' },
+      { k: 'voiceEnabled', t: 'bool', label: 'Sprachnachrichten im Team-Chat (wie ein Walkie-Talkie)' },
+      { k: 'spectatorsEnabled', t: 'bool', label: 'Zuschauer dürfen beitreten' },
+      { k: 'spectatorDelaySec', t: 'num', label: 'Zuschauer sehen alles verzögert um (Sekunden)', hint: 'Damit Zuschauer den Spielern nichts Aktuelles verraten können.' },
     ] },
     { group: 'Anti-Cheat', items: [
       { k: 'antiVpn', t: 'select', label: 'VPN/Proxy', options: [['off', 'nicht prüfen'], ['warn', 'erkennen und Spielleitung warnen'], ['block', 'blockieren']], hint: 'Die App meldet aktive VPNs. Zusätzlich kann der Server IP-Adressen prüfen (VPN_CHECK=ipapi).' },
@@ -95,13 +103,14 @@
             const st = h('input', { type: 'number', min: '0', max: '20', value: v.start, title: 'zum Start' });
             const ob = h('input', { type: 'checkbox', checked: v.obtainable, title: 'im Spiel erhältlich' });
             const du = a.durationSec ? h('input', { type: 'number', min: '10', max: '3600', value: v.durationSec, title: 'Dauer in Sekunden' }) : null;
-            nested.abilities[a.key] = { en, st, ob, du };
+            const cd = h('input', { type: 'number', min: '0', max: '3600', value: v.cooldownSec ?? a.cooldownSec ?? 0, title: 'Abklingzeit in Sekunden' });
+            nested.abilities[a.key] = { en, st, ob, du, cd };
             return h('tr', {},
               h('td', {}, h('b', {}, `${a.icon} ${a.name}`), h('div', { class: 'hint' }, `${TEAM[a.team]} · ${a.desc}`)),
-              h('td', {}, en), h('td', {}, st), h('td', {}, ob), h('td', {}, du || '–'));
+              h('td', {}, en), h('td', {}, st), h('td', {}, ob), h('td', {}, du || '–'), h('td', {}, cd));
           });
           inner.append(h('div', { class: 'tablewrap' }, h('table', { class: 'cfg' },
-            h('thead', {}, h('tr', {}, h('th', {}, 'Fähigkeit'), h('th', {}, 'Erlaubt'), h('th', {}, 'Zum Start'), h('th', {}, 'Im Spiel erhältlich'), h('th', {}, 'Dauer (s)'))),
+            h('thead', {}, h('tr', {}, h('th', {}, 'Fähigkeit'), h('th', {}, 'Erlaubt'), h('th', {}, 'Zum Start'), h('th', {}, 'Im Spiel erhältlich'), h('th', {}, 'Dauer (s)'), h('th', {}, 'Abklingzeit (s)'))),
             h('tbody', {}, rows))));
         } else if (f.t === 'quests') {
           nested.quests = {};
@@ -142,7 +151,7 @@
       for (const [k, i] of Object.entries(inputs)) out[k] = i.type === 'checkbox' ? i.checked : i.tagName === 'SELECT' ? i.value : Number(i.value);
       if (nested.abilities) {
         out.abilities = {};
-        for (const [k, x] of Object.entries(nested.abilities)) out.abilities[k] = { enabled: x.en.checked, start: Number(x.st.value), obtainable: x.ob.checked, ...(x.du ? { durationSec: Number(x.du.value) } : {}) };
+        for (const [k, x] of Object.entries(nested.abilities)) out.abilities[k] = { enabled: x.en.checked, start: Number(x.st.value), obtainable: x.ob.checked, cooldownSec: Number(x.cd.value), ...(x.du ? { durationSec: Number(x.du.value) } : {}) };
       }
       if (nested.quests) {
         out.quests = {};
@@ -204,6 +213,10 @@
           return h('figure', {},
             h('button', { onclick: () => { $('#lbImg').src = src; $('#lbCap').textContent = cap; $('#lightbox').showModal(); } }, h('img', { src, alt: '', loading: 'lazy' })),
             h('figcaption', {}, cap),
+            h('button', { class: 'btn small light', title: ph.quest ? 'Quest-Foto ablehnen: Punkte und Belohnung werden zurückgenommen' : 'Foto entfernen', onclick: async () => {
+              if (!confirm(ph.quest ? 'Quest-Foto ablehnen? Punkte und Belohnung werden zurückgenommen.' : 'Foto entfernen?')) return;
+              if (await act(g.code, 'rejectphoto', { photoId: ph.id })) { toast('Foto abgelehnt'); }
+            } }, ph.quest ? '❌ Ablehnen' : '🗑️'),
             ph.featured ? h('span', { class: 'chip gold' }, '⭐ in Galerie')
               : h('button', { class: 'btn small gold', onclick: async () => {
                 const caption = prompt('Bildunterschrift (optional):', '') ?? null;
@@ -248,7 +261,7 @@
       h('div', { class: 'row between' },
         h('h3', {}, `${g.name} `, h('span', { class: 'code' }, g.code)),
         h('span', { class: `chip ${g.status === 'running' ? 'runner' : g.status === 'ended' ? 'plain' : 'gold'}` }, STATUS[g.status])),
-      h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.photos} Fotos`),
+      h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.spectators || 0} Zuschauer, ${g.photos} Fotos`),
       g.flagged.length ? h('p', { class: 'err small' }, `⚠️ Verdacht: ${g.flagged.map((f) => `${f.name} (${[f.flags.vpn && 'VPN', f.flags.spoof && 'GPS'].filter(Boolean).join(', ')})`).join(', ')}`) : null,
       h('div', { class: 'row' },
         h('input', { type: 'text', readonly: true, value: link, 'aria-label': 'Einladungslink', class: 'grow' }),

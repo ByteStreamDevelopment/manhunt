@@ -29,6 +29,21 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.1
+
+* **Seitenwechsel:** Gefangene Runner spielen automatisch als Hunter weiter (abschaltbar). „Befreiung“ oder „Wieder frei“ macht sie wieder zu Runnern.
+* **Team-Chat** mit **Sprachnachrichten** (Walkie-Talkie: Knopf gedrückt halten, max. 30 s). Jedes Team sieht nur seinen eigenen Chat, die Spielleitung alle. Echter Live-Sprachfunk bräuchte einen eigenen Medienserver (WebRTC/TURN) und ist daher nicht eingebaut.
+* **Zuschauer-Modus:** Zuschauer sehen alles exakt, aber standardmäßig 2 Minuten verzögert, damit sie nichts verraten können.
+* **Abklingzeiten** pro Fähigkeit und **Freeze-Immunität** (kein Dauer-Freeze durch mehrere Runner), ein Radar gleichzeitig.
+* **Quest-Fotos ablehnen:** In `/admin` → Spiel → „Fotos“ (oder in der App) nimmt „Ablehnen“ Punkte und Belohnung zurück.
+* **Wiederholung:** Nach Spielende das ganze Spiel als Animation auf der Karte abspielen (Website und App).
+* **Abzeichen** (18 Stück) in der Bestenliste, z. B. Phantom (nie live geortet), Seitenwechsel, Eiszeit.
+* **Spielleitung in der App** für Admin-Accounts: Spiele starten/beenden, Durchsagen, Live-Karte, Fähigkeiten schenken, Fotos in die Galerie übernehmen oder ablehnen.
+* **Funkloch:** Die App sammelt Positionen ohne Netz und reicht sie nach (`POST /api/g/CODE/locations`).
+* **Datenbank:** SQLite statt `db.json` (eingebaut in Node.js ab 22.13). Eine vorhandene `db.json` wird beim ersten Start automatisch übernommen (danach heißt sie `db.json.migrated`). Standorte werden nur noch angehängt statt jedes Mal komplett neu geschrieben.
+* **Datenschutz:** Standortdaten beendeter Spiele werden nach `RETENTION_DAYS` (Standard 30) Tagen gelöscht.
+* **Sicherheit:** `X-Forwarded-For` wird nur noch von Proxys im eigenen Netz akzeptiert (`TRUST_PROXY`), damit niemand die Bremse gegen Passwort-Durchprobieren mit gefälschten Adressen umgehen kann.
+
 ## Features (alle in `/admin` pro Spiel schaltbar)
 
 | Feature | Standard |
@@ -55,7 +70,7 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 
 ## Installation
 
-Es gibt **keine npm-Abhängigkeiten**. Nötig ist nur Node.js ab Version 18 (getestet mit 22).
+Es gibt **keine npm-Abhängigkeiten**. Nötig ist Node.js ab Version 22.13 (wegen der eingebauten SQLite-Datenbank).
 
 ### Empfehlung: Linux-VPS
 
@@ -95,6 +110,8 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `VPN_CHECK` | `ipapi` = IP-Adressen auf VPN/Proxy prüfen | `off` |
 | `OVERPASS_URL` | Overpass-Server für große Orte (Pickups, Quests) | `https://overpass-api.de/api/interpreter` |
 | `ANDROID_CERT_SHA256` | Fingerabdruck der App für App-Links | – |
+| `RETENTION_DAYS` | Standortdaten beendeter Spiele nach so vielen Tagen löschen (0 = nie) | 30 |
+| `TRUST_PROXY` | `private`: X-Forwarded-For nur von Proxys im eigenen Netz, `always`, `never` | `private` |
 
 ## Sicherheit und Datenschutz
 
@@ -111,7 +128,9 @@ lib/catalog.js     Alle Fähigkeiten und Quests (Namen, Texte, Standardwerte)
 lib/smtp.js        Mini-SMTP-Client für Bestätigungs-Mails
 lib/geo.js         Entfernungen, große Orte über Overpass
 lib/anticheat.js   VPN- und GPS-Fälschungs-Erkennung
-test/e2e.mjs       End-to-End-Test (npm test)
+lib/store.js       SQLite-Speicher (Spiele, Accounts, Standorte)
+test/features.mjs  Schneller Test (Neustart, Chat, Zuschauer, Abklingzeiten, Seitenwechsel …)
+test/e2e.mjs       End-to-End-Test inkl. Quests/Pickups/Live-Strafe (npm test, ca. 2 Minuten)
 public/            Startseite, Spielseite, Admin-Bereich, Bestenliste, Galerie
 Dockerfile, docker-compose.yml, Caddyfile.example, manhunt.service.example
 ```

@@ -10,57 +10,58 @@
  * durationSec: Wirkdauer (0 = sofort)
  * target: 'caughtRunner' = man wählt einen gefangenen Runner aus
  * start: Standard-Anzahl zum Spielstart, obtainable: kann man im Spiel bekommen
+ * cooldownSec: so lange muss man warten, bis man dieselbe Fähigkeit wieder einsetzen kann
  */
 const ABILITIES = {
   // ---------------- Runner ----------------
   freeze: {
-    team: 'runner', icon: '🧊', name: 'Freeze', durationSec: 90, start: 1, obtainable: true,
+    team: 'runner', icon: '🧊', name: 'Freeze', durationSec: 90, cooldownSec: 300, start: 1, obtainable: true,
     desc: 'Alle Hunter sind eingefroren: Sie sehen keine Runner mehr und können niemanden fangen.',
   },
   cloak: {
-    team: 'runner', icon: '👻', name: 'Tarnkappe', durationSec: 180, start: 0, obtainable: true,
+    team: 'runner', icon: '👻', name: 'Tarnkappe', durationSec: 180, cooldownSec: 240, start: 0, obtainable: true,
     desc: 'Du verschwindest von der Karte der Hunter.',
   },
   decoy: {
-    team: 'runner', icon: '🎭', name: 'Köder', durationSec: 300, start: 0, obtainable: true,
+    team: 'runner', icon: '🎭', name: 'Köder', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
     desc: 'Hunter sehen dich an einer falschen Position, 300–600 m entfernt.',
   },
   fog: {
-    team: 'runner', icon: '🌫️', name: 'Nebelwand', durationSec: 300, start: 0, obtainable: true,
+    team: 'runner', icon: '🌫️', name: 'Nebelwand', durationSec: 300, cooldownSec: 180, start: 0, obtainable: true,
     desc: 'Deine Position wird für Hunter um bis zu 400 m zusätzlich verwischt.',
   },
   photoJoker: {
-    team: 'runner', icon: '🃏', name: 'Fotojoker', durationSec: 0, start: 0, obtainable: true,
+    team: 'runner', icon: '🃏', name: 'Fotojoker', durationSec: 0, cooldownSec: 0, start: 0, obtainable: true,
     desc: 'Die aktuelle Foto-Runde gilt als erledigt. Beendet auch einen Live-Standort wegen fehlendem Foto.',
   },
   rescue: {
-    team: 'runner', icon: '🔓', name: 'Befreiung', durationSec: 0, start: 0, obtainable: true, target: 'caughtRunner',
+    team: 'runner', icon: '🔓', name: 'Befreiung', durationSec: 0, cooldownSec: 300, start: 0, obtainable: true, target: 'caughtRunner',
     desc: 'Befreit einen gefangenen Runner, er ist sofort wieder im Spiel.',
   },
   // ---------------- Hunter ----------------
   radar: {
-    team: 'hunter', icon: '📡', name: 'Radar', durationSec: 180, start: 1, obtainable: true,
+    team: 'hunter', icon: '📡', name: 'Radar', durationSec: 180, cooldownSec: 300, start: 1, obtainable: true,
     desc: 'Alle Hunter sehen den Live-Standort aller Runner, exakt und alle paar Sekunden aktualisiert.',
   },
   ping: {
-    team: 'hunter', icon: '🎯', name: 'Peilung', durationSec: 60, start: 0, obtainable: true,
+    team: 'hunter', icon: '🎯', name: 'Peilung', durationSec: 60, cooldownSec: 120, start: 0, obtainable: true,
     desc: 'Der nächste Runner muss sofort seinen exakten Standort senden und bleibt eine Minute live.',
   },
   photoOrder: {
-    team: 'hunter', icon: '📸', name: 'Fotobefehl', durationSec: 120, start: 0, obtainable: true,
+    team: 'hunter', icon: '📸', name: 'Fotobefehl', durationSec: 120, cooldownSec: 300, start: 0, obtainable: true,
     desc: 'Alle Runner müssen innerhalb von 2 Minuten ein Foto hochladen, sonst wird ihr Standort live geteilt.',
   },
   tracker: {
-    team: 'hunter', icon: '🐾', name: 'Spurenleser', durationSec: 300, start: 0, obtainable: true,
+    team: 'hunter', icon: '🐾', name: 'Spurenleser', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
     desc: 'Hunter sehen die komplette, exakte Route aller Runner.',
   },
   thaw: {
-    team: 'hunter', icon: '🔥', name: 'Eisbrecher', durationSec: 0, start: 0, obtainable: true,
+    team: 'hunter', icon: '🔥', name: 'Eisbrecher', durationSec: 0, cooldownSec: 0, start: 0, obtainable: true,
     desc: 'Beendet einen Freeze sofort für alle Hunter.',
   },
   // ---------------- Beide ----------------
   shield: {
-    team: 'any', icon: '🛡️', name: 'Schild', durationSec: 300, start: 0, obtainable: true,
+    team: 'any', icon: '🛡️', name: 'Schild', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
     desc: 'Du bist immun gegen Fähigkeiten des anderen Teams (Freeze, Radar, Peilung, Fotobefehl).',
   },
 };
@@ -124,15 +125,40 @@ const QUESTS = {
     desc: 'Durchsuche das Gebiet am markierten Punkt.' },
 };
 
+/*
+ * Abzeichen für die Bestenliste. stat = Zähler in der Account-Statistik, min = ab diesem Wert.
+ */
+const BADGES = [
+  { key: 'firstGame', icon: '🎮', name: 'Neuling', desc: 'Erstes Spiel gespielt', stat: 'games', min: 1 },
+  { key: 'veteran', icon: '🎖️', name: 'Veteran', desc: '10 Spiele gespielt', stat: 'games', min: 10 },
+  { key: 'firstCatch', icon: '🪤', name: 'Erster Fang', desc: 'Einen Runner gefangen', stat: 'catches', min: 1 },
+  { key: 'bountyHunter', icon: '🤠', name: 'Kopfgeldjäger', desc: '10 Runner gefangen', stat: 'catches', min: 10 },
+  { key: 'winner', icon: '🏆', name: 'Sieger', desc: 'Ein Spiel gewonnen', stat: 'wins', min: 1 },
+  { key: 'champion', icon: '👑', name: 'Champion', desc: '5 Spiele gewonnen', stat: 'wins', min: 5 },
+  { key: 'survivor', icon: '⏱️', name: 'Überlebenskünstler', desc: 'Insgesamt 60 Minuten als Runner überlebt', stat: 'surviveMin', min: 60 },
+  { key: 'marathon', icon: '🏃', name: 'Marathon', desc: 'Insgesamt 5 Stunden als Runner überlebt', stat: 'surviveMin', min: 300 },
+  { key: 'ghost', icon: '👻', name: 'Phantom', desc: 'Als Runner bis zum Ende durchgekommen, ohne je live geortet zu werden', stat: 'cleanEscapes', min: 1 },
+  { key: 'questStarter', icon: '📜', name: 'Abenteurer', desc: '5 Quests geschafft', stat: 'quests', min: 5 },
+  { key: 'questMaster', icon: '🧙', name: 'Questmeister', desc: '25 Quests geschafft', stat: 'quests', min: 25 },
+  { key: 'collector', icon: '🧺', name: 'Sammler', desc: '10 Fähigkeiten eingesammelt', stat: 'pickups', min: 10 },
+  { key: 'iceAge', icon: '🧊', name: 'Eiszeit', desc: '5-mal Freeze eingesetzt', stat: 'freezes', min: 5 },
+  { key: 'radarOperator', icon: '📡', name: 'Funker', desc: '5-mal Radar eingesetzt', stat: 'radars', min: 5 },
+  { key: 'turncoat', icon: '🔄', name: 'Seitenwechsel', desc: 'Nach dem eigenen Fang als Hunter selbst einen Runner gefangen', stat: 'revenge', min: 1 },
+  { key: 'photographer', icon: '📸', name: 'Fotograf', desc: 'Ein Foto in der Galerie der besten Fotos', stat: 'featured', min: 1 },
+  { key: 'artist', icon: '🖼️', name: 'Künstler', desc: '5 Fotos in der Galerie', stat: 'featured', min: 5 },
+  { key: 'chatter', icon: '💬', name: 'Funkverkehr', desc: '50 Nachrichten im Team-Chat', stat: 'chats', min: 50 },
+];
+
 /* Punkte für die Bestenliste */
 const POINTS = {
   catch: 100, caughtByHunterWin: 200, runnerWin: 300, survivePerMin: 2, pickup: 20, photo: 5, featured: 100, abilityUsed: 0,
 };
 
 function catalogForClients() {
-  const ab = {}; for (const [k, a] of Object.entries(ABILITIES)) ab[k] = { key: k, team: a.team, icon: a.icon, name: a.name, desc: a.desc, durationSec: a.durationSec, target: a.target || null };
+  const ab = {}; for (const [k, a] of Object.entries(ABILITIES)) ab[k] = { key: k, team: a.team, icon: a.icon, name: a.name, desc: a.desc, durationSec: a.durationSec, cooldownSec: a.cooldownSec, target: a.target || null };
   const qu = {}; for (const [k, q] of Object.entries(QUESTS)) qu[k] = { key: k, team: q.team, kind: q.kind, icon: q.icon, title: q.title, desc: q.desc, minutes: q.minutes, points: q.points };
-  return { abilities: ab, quests: qu };
+  const badges = BADGES.map(({ key, icon, name, desc }) => ({ key, icon, name, desc }));
+  return { abilities: ab, quests: qu, badges };
 }
 
-module.exports = { ABILITIES, QUESTS, POINTS, catalogForClients };
+module.exports = { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients };

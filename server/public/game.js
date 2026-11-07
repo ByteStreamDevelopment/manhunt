@@ -66,6 +66,8 @@
       s.abilitiesEnabled && 'Fähigkeiten wie Freeze, Tarnkappe oder Radar kannst du jederzeit einsetzen.',
       s.pickupsEnabled && 'An großen Orten (z. B. Supermärkten) liegen Fähigkeiten zum Einsammeln.',
       s.antiSpoof !== 'off' && 'GPS-Fälschungen und VPNs werden erkannt.',
+      s.caughtBecomeHunter && 'Wer gefangen wird, jagt ab dann als Hunter mit.',
+      s.chatEnabled && `Jedes Team hat einen eigenen Chat${s.voiceEnabled ? ' mit Sprachnachrichten' : ''}.`,
     ].filter(Boolean);
     const err = h('p', { class: 'err', role: 'alert' });
     const radio = (val, title, text) => h('label', { class: `choice ${val}` }, h('input', { type: 'radio', name: 'role', value: val }), h('span', {}, h('b', {}, title), text));
@@ -91,6 +93,8 @@
         h('div', {}, h('label', {}, 'Rolle'), h('div', { class: 'choices' },
           radio('runner', 'Runner', 'Du wirst gejagt und teilst deinen Standort.'),
           radio('hunter', 'Hunter', 'Du suchst die Runner anhand ihres Standorts.'))),
+        s.spectatorsEnabled && h('label', { class: 'field-bool' }, h('input', { type: 'radio', name: 'role', value: 'spectator' }),
+          h('span', {}, h('b', {}, '👀 Nur zuschauen'), ` – du siehst alles, aber ${s.spectatorDelaySec} Sekunden verzögert.`)),
         err, go),
       card('', h('h3', {}, 'So läuft dieses Spiel'), h('ul', {}, rules.map((r) => h('li', {}, r))),
         h('p', { class: 'small muted' }, 'Mit dem Beitritt erlaubst du, dass dein Standort und deine Fotos für die Mitspielenden sichtbar sind (Runner) bzw. du die Positionen der Runner siehst (Hunter). Tipp: Mit der Android-App läuft das Tracking auch bei gesperrtem Bildschirm.')),
@@ -109,9 +113,11 @@
   let audioCtx = null, lastAlarmAt = 0, wasOverdue = false, releaseHandled = false;
   let seenPhotos = null, seenMsg = null, prevStatus = null, prevCaught = null, photoSig = '', bannerSig = '';
   let refreshing = false, again = false, tab = 'lage', seenInbox = null;
+  const seenChat = new Set();
 
   const me = () => S.self;
-  const shouldShare = () => S && S.game.status === 'running' && !S.self.caught && S.self.role !== 'admin'
+  const isPlayer = () => S && (S.self.role === 'runner' || S.self.role === 'hunter');
+  const shouldShare = () => S && S.game.status === 'running' && !S.self.caught && isPlayer()
     && (S.self.role === 'runner' || S.settings.huntersVisibleToHunters || S.settings.huntersVisibleToRunners);
 
   /* --- Ton, Vibration, Bildschirm wach --- */
@@ -402,7 +408,10 @@
     if (!S) return;
     const g = S.game, s = S.settings, r = me().role;
     const kids = [statusCard()];
-    if (r !== 'admin' && g.status !== 'ended') kids.push(trackingCard());
+    if (r === 'spectator') kids.push(card('', h('h3', {}, '👀 Du schaust zu'), h('p', {}, `Du siehst alle Positionen exakt, aber ${me().spectatorDelaySec} Sekunden verzögert.`)));
+    if (isPlayer() && g.status !== 'ended') kids.push(trackingCard());
+    if (me().converted && g.status === 'running') kids.push(card('gold', h('h3', {}, '🔄 Seitenwechsel'), h('p', {}, 'Du wurdest gefangen und jagst jetzt als Hunter mit.')));
+    if (g.status === 'ended') kids.push(replayCard());
     if (r === 'runner' && s.photosEnabled && g.status !== 'ended') kids.push(photoCard());
     if (r === 'hunter' && s.photosEnabled && g.status === 'running') kids.push(hunterPhotoCard());
     if (r === 'hunter' && s.showDistance && g.status === 'running') kids.push(distanceCard());
@@ -419,6 +428,7 @@
   function renderActions() {
     const el = $('#tab-actions'); if (!el || !S) return;
     if (me().role === 'admin') { el.replaceChildren(card('', h('p', {}, 'Als Spielleitung siehst du hier nichts. Fähigkeiten verschenken kannst du im Admin-Bereich unter „Spieler“.'))); return; }
+    if (me().role === 'spectator') { el.replaceChildren(card('', h('p', {}, 'Als Zuschauer hast du keine Fähigkeiten und Quests. Aktive Effekte siehst du auf der Karte und in den Meldungen.'))); return; }
     const g = S.game, sf = S.self;
     const kids = [];
     const eff = (S.effects || []).map((e) => {
@@ -429,8 +439,10 @@
     // Fähigkeiten
     const abil = (sf.abilities || []).map((x) => {
       const a = CAT.abilities[x.key] || { icon: '?', name: x.key, desc: '' };
-      return h('button', { disabled: g.status !== 'running' || sf.caught, onclick: () => useAbility(x.key, a) },
-        h('span', { class: 'n' }, `×${x.count}`), h('b', {}, `${a.icon} ${a.name}`), h('span', { class: 'small muted' }, a.desc));
+      const cd = (sf.cooldowns || []).find((c) => c.key === x.key);
+      return h('button', { disabled: g.status !== 'running' || sf.caught || (cd && cd.until > nowMs()), onclick: () => useAbility(x.key, a) },
+        h('span', { class: 'n' }, `×${x.count}`), h('b', {}, `${a.icon} ${a.name}`), h('span', { class: 'small muted' }, a.desc),
+        cd && cd.until > nowMs() ? h('div', { class: 'small' }, '⏳ wieder bereit in ', clk('until', cd.until)) : null);
     });
     kids.push(card('', h('h3', {}, `Deine Fähigkeiten`), abil.length ? h('div', { class: 'abil' }, abil) : h('p', { class: 'muted' }, 'Keine. Schaff Quests oder sammle Fähigkeiten auf der Karte ein (🎁).')));
     // Quests
@@ -471,6 +483,96 @@
     try { await api(`/api/g/${CODE}/ability`, { method: 'POST', token: TOKEN, body: { key, targetId } }); toast(`${a.icon} ${a.name} eingesetzt!`); refresh(); }
     catch (e) { toast(e.message); }
   }
+  /* ---------------- Team-Chat mit Sprachnachrichten ---------------- */
+  let chatSig = '', recorder = null, recChunks = [], recStart = 0;
+  function renderChat(force) {
+    const el = $('#tab-chat'); if (!el || !S) return;
+    const list = S.chat || [];
+    const sig = list.map((c) => c.id).join(',');
+    if (!force && sig === chatSig && el.childElementCount) return;
+    chatSig = sig;
+    const team = { runner: 'Runner', hunter: 'Hunter', spectator: 'Zuschauer', admin: 'alle Teams' }[me().role] || '';
+    const items = list.map((c) => h('li', { class: c.pid === me().id ? 'mine' : '' },
+      h('div', { class: 'who' }, `${c.name}${me().role === 'admin' ? ` (${c.team})` : ''} · ${clock(c.ts)}`),
+      c.voice ? h('audio', { controls: true, preload: 'none', src: `/api/g/${CODE}/chat/voice/${c.voice.id}?t=${encodeURIComponent(TOKEN)}` }) : h('div', {}, c.text)));
+    const input = h('input', { type: 'text', maxlength: '300', placeholder: 'Nachricht ans Team …' });
+    const send = async () => {
+      const t = input.value.trim(); if (!t) return;
+      try { await api(`/api/g/${CODE}/chat`, { method: 'POST', token: TOKEN, body: { text: t } }); input.value = ''; refresh(); }
+      catch (e) { toast(e.message); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    const canWrite = me().role !== 'admin' && S.settings.chatEnabled;
+    const rec = h('button', { class: 'btn rec', title: 'Gedrückt halten zum Sprechen' }, '🎙️');
+    const startRec = async (e) => {
+      e.preventDefault();
+      if (recorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg'].find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+        recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
+        recChunks = []; recStart = Date.now();
+        recorder.ondataavailable = (ev) => recChunks.push(ev.data);
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(recChunks, { type: (recorder.mimeType || 'audio/webm').split(';')[0] });
+          const dur = Math.round((Date.now() - recStart) / 1000);
+          recorder = null; rec.textContent = '🎙️';
+          if (dur < 1) { toast('Zu kurz – gedrückt halten'); return; }
+          try { await api(`/api/g/${CODE}/chat/voice?dur=${dur}`, { method: 'POST', token: TOKEN, body: blob, contentType: blob.type }); refresh(); }
+          catch (x) { toast(x.message); }
+        };
+        recorder.start();
+        rec.textContent = '⏺️';
+        setTimeout(() => { if (recorder && recorder.state === 'recording') recorder.stop(); }, 30000);
+      } catch { toast('Kein Mikrofon-Zugriff'); }
+    };
+    const stopRec = () => { if (recorder && recorder.state === 'recording') recorder.stop(); };
+    rec.addEventListener('pointerdown', startRec);
+    rec.addEventListener('pointerup', stopRec);
+    rec.addEventListener('pointerleave', stopRec);
+    el.replaceChildren(card('',
+      h('h3', {}, `💬 Team-Chat (${team})`),
+      items.length ? h('ul', { class: 'chat' }, items) : h('p', { class: 'muted' }, 'Noch keine Nachrichten. Nur dein Team kann mitlesen.'),
+      canWrite ? h('div', { class: 'chatbar' }, input, h('button', { class: 'btn', onclick: send }, 'Senden'), S.settings.voiceEnabled ? rec : null) : null));
+  }
+
+  /* ---------------- Wiederholung nach Spielende ---------------- */
+  let replayTimer = null, replayLayers = [];
+  function replayCard() {
+    const g = S.game;
+    if (!g.startedAt || !g.endedAt) return null;
+    const slider = h('input', { type: 'range', min: String(g.startedAt), max: String(g.endedAt), value: String(g.endedAt), step: '1000' });
+    const lbl = h('span', { class: 'mono' }, dur(g.endedAt - g.startedAt));
+    const draw = (t) => {
+      for (const l of replayLayers) l.remove();
+      replayLayers = [];
+      lbl.textContent = dur(t - g.startedAt);
+      for (const p of S.players) {
+        const pts = (p.trail || []).filter((x) => x[2] <= t);
+        if (!pts.length) continue;
+        const color = p.role === 'runner' ? '#0f8a4a' : p.converted ? '#8a3a0f' : '#c7301f';
+        replayLayers.push(L.polyline(pts.map((x) => [x[0], x[1]]), { color, weight: 4, opacity: 0.85 }).addTo(map));
+        const last = pts[pts.length - 1];
+        replayLayers.push(L.circleMarker([last[0], last[1]], { radius: 7, color: '#14201a', weight: 2, fillColor: color, fillOpacity: 1 }).bindTooltip(p.name, { permanent: true, direction: 'top' }).addTo(map));
+      }
+    };
+    const stopPlay = () => { if (replayTimer) clearInterval(replayTimer); replayTimer = null; };
+    slider.addEventListener('input', () => { stopPlay(); hideLive(true); draw(Number(slider.value)); });
+    const play = h('button', { class: 'btn', onclick: () => {
+      stopPlay(); hideLive(true);
+      let t = g.startedAt;
+      const step = Math.max(1000, (g.endedAt - g.startedAt) / 300); // ca. 30 Sekunden Abspieldauer
+      replayTimer = setInterval(() => { t = Math.min(g.endedAt, t + step); slider.value = String(t); draw(t); if (t >= g.endedAt) stopPlay(); }, 100);
+    } }, '▶️ Abspielen');
+    const back = h('button', { class: 'btn light', onclick: () => { stopPlay(); for (const l of replayLayers) l.remove(); replayLayers = []; hideLive(false); } }, 'Live-Ansicht');
+    return card('stack', h('h3', {}, '🎬 Wiederholung'), h('p', { class: 'small muted' }, 'Spiel das ganze Spiel noch einmal auf der Karte ab.'),
+      h('div', { class: 'replay' }, slider, h('div', { class: 'row between' }, lbl, h('div', { class: 'row' }, play, back))));
+  }
+  function hideLive(hide) {
+    for (const coll of [layers.markers, layers.trails, layers.circles]) for (const l of coll.values()) { if (hide) l.remove(); else l.addTo(map); }
+  }
+
   function renderFreeze() {
     let ov = $('#freeze');
     const until = S && S.self.frozenUntil;
@@ -619,7 +721,11 @@
     prevCaught = me().caught;
 
     if (!map) { initMap(); if (r !== 'admin' && !tracking) autoStart(); }
-    updateMap(); renderLage(); renderPlayers(); renderPhotos(); renderActions(); renderFreeze(); updateBanner();
+    updateMap(); renderLage(); renderPlayers(); renderPhotos(); renderActions(); renderChat(); renderFreeze(); updateBanner();
+    const newChat = (S.chat || []).filter((c) => c.pid !== me().id && !seenChat.has(c.id));
+    if (seenChat.size || !prev) for (const c of newChat) if (prev && tab !== 'chat') toast(`💬 ${c.name}: ${c.voice ? '🎙️ Sprachnachricht' : c.text}`, 5000);
+    for (const c of S.chat || []) seenChat.add(c.id);
+    $('#tabbtn-chat').textContent = newChat.length && tab !== 'chat' && prev ? `Chat (${newChat.length})` : 'Chat';
   }
   async function autoStart() {
     try {
@@ -655,6 +761,7 @@
       $(`#tab-${b.dataset.tab}`).hidden = !on;
     }
     if (name === 'photos') { photoSig = ''; if (S) renderPhotos(); }
+    if (name === 'chat' && S) { $('#tabbtn-chat').textContent = 'Chat'; renderChat(true); }
   }
 
   if (TOKEN) startApp(); else showJoin();

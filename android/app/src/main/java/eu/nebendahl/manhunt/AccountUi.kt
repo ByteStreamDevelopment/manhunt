@@ -212,7 +212,7 @@ fun AuthScreen() {
 /* ------------------------------------------------------------------ */
 
 @Composable
-fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Unit, openGallery: () -> Unit) {
+fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Unit, openGallery: () -> Unit, openAdmin: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var code by rememberSaveable(inviteCode) { mutableStateOf(inviteCode.orEmpty()) }
@@ -269,6 +269,7 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
             OutlinedButton(onClick = openLeaderboard, modifier = Modifier.weight(1f)) { Text("🏆 Bestenliste") }
             OutlinedButton(onClick = openGallery, modifier = Modifier.weight(1f)) { Text("⭐ Galerie") }
         }
+        if (account.isAdmin) Button(onClick = openAdmin, modifier = Modifier.fillMaxWidth()) { Text("👑 Spielleitung") }
 
         OutlinedTextField(
             value = code,
@@ -301,6 +302,8 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
                     if (i.abilitiesEnabled) Text("• Fähigkeiten wie Freeze, Tarnkappe oder Radar setzt du jederzeit ein.")
                     if (i.pickupsEnabled) Text("• An großen Orten (z. B. Supermärkten) liegen Fähigkeiten zum Einsammeln.")
                     if (i.antiCheat) Text("• Fake-GPS und VPNs werden erkannt.")
+                    if (i.caughtBecomeHunter) Text("• Wer gefangen wird, jagt ab dann als Hunter mit.")
+                    if (i.chatEnabled) Text("• Jedes Team hat einen eigenen Chat" + if (i.voiceEnabled) " mit Sprachnachrichten." else ".")
                 }
             }
             if (i.status == "ended") {
@@ -309,12 +312,17 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilterChip(selected = role == "runner", onClick = { role = "runner" }, label = { Text("🏃 Runner") })
                     FilterChip(selected = role == "hunter", onClick = { role = "hunter" }, label = { Text("🎯 Hunter") })
+                    if (i.spectatorsEnabled) FilterChip(selected = role == "spectator", onClick = { role = "spectator" }, label = { Text("👀 Zuschauen") })
                 }
                 Text(
-                    if (role == "runner") "Du wirst gejagt und teilst deinen Standort." else "Du suchst die Runner anhand ihres Standorts.",
+                    when (role) {
+                        "runner" -> "Du wirst gejagt und teilst deinen Standort."
+                        "hunter" -> "Du suchst die Runner anhand ihres Standorts."
+                        else -> "Du siehst alles, aber ${i.spectatorDelaySec} Sekunden verzögert. Dein Standort wird nicht geteilt."
+                    },
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(onClick = { error = null; permLauncher.launch(gamePermissions) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { error = null; if (role == "spectator") join() else permLauncher.launch(gamePermissions) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                     Text(if (busy) "Bitte warten …" else "Als ${account.username} beitreten")
                 }
                 Text(
@@ -341,6 +349,8 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
 fun LeaderboardScreen(onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val me = GameRepository.account.collectAsState().value?.username
+    val cat = GameRepository.catalog.collectAsState().value
+    var showBadges by remember { mutableStateOf<BoardRow?>(null) }
     var sort by rememberSaveable { mutableStateOf("points") }
     var rows by remember { mutableStateOf<List<BoardRow>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -362,13 +372,14 @@ fun LeaderboardScreen(onBack: () -> Unit) {
                     itemsIndexed(rows!!) { i, r ->
                         val mine = r.username.equals(me, ignoreCase = true)
                         Card(
-                            Modifier.fillMaxWidth(),
+                            Modifier.fillMaxWidth().clickable { showBadges = r },
                             colors = if (mine) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)) else CardDefaults.cardColors(),
                         ) {
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (i < 3) listOf("🥇", "🥈", "🥉")[i] else "${i + 1}.", Modifier.width(40.dp), fontSize = 20.sp, textAlign = TextAlign.Center)
                                 Column(Modifier.weight(1f)) {
                                     Text(r.username + (if (r.isAdmin) " 👑" else ""), fontWeight = FontWeight.Bold)
+                                    if (r.badges.isNotEmpty()) Text(r.badges.mapNotNull { k -> cat?.badges?.get(k)?.icon }.joinToString(" "))
                                     Text(
                                         "${r.games} Spiele · ${r.wins} Siege · ${r.catches} Fänge · ${r.quests} Quests · ${r.surviveMin} min überlebt" +
                                             if (r.featured > 0) " · ⭐${r.featured}" else "",
@@ -384,11 +395,34 @@ fun LeaderboardScreen(onBack: () -> Unit) {
             }
         }
     }
+    showBadges?.let { BadgesDialog(it, cat) { showBadges = null } }
 }
 
-/* ------------------------------------------------------------------ */
-/* Galerie der besten Fotos                                            */
-/* ------------------------------------------------------------------ */
+/** Alle Abzeichen: erreichte farbig, fehlende ausgegraut. */
+@Composable
+private fun BadgesDialog(row: BoardRow, cat: Catalog?, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🏅 ${row.username}") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val all = cat?.badges?.values?.toList() ?: emptyList()
+                items(all.size) { idx ->
+                    val b = all[idx]
+                    val has = b.key in row.badges
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(b.icon, fontSize = 24.sp, modifier = Modifier.width(40.dp), color = if (has) Color.Unspecified else Color.Gray.copy(alpha = 0.4f))
+                        Column {
+                            Text(b.name, fontWeight = FontWeight.Bold, color = if (has) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(b.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Schließen") } },
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

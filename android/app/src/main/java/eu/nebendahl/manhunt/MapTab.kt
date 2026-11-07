@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -95,7 +98,19 @@ fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () 
     // Nur neu zeichnen, wenn sich Daten ändern (nicht jede Sekunde), sonst schließen sich offene Infofenster.
     // Veraltete Positionen werden über einen Minutentakt aktualisiert.
     val minute = serverNow / 60_000
-    LaunchedEffect(st, fix, minute) { redraw(mapView, st, fix, serverNow) }
+    // Wiederholung nach Spielende: null = normale Ansicht, sonst Zeitpunkt (Server-Zeit)
+    var replayT by remember(st.game.code) { mutableStateOf<Long?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    LaunchedEffect(st, fix, minute, replayT) { redraw(mapView, st, fix, serverNow, replayT) }
+    LaunchedEffect(playing) {
+        val start = st.game.startedAt ?: return@LaunchedEffect
+        val end = st.game.endedAt ?: return@LaunchedEffect
+        if (!playing) return@LaunchedEffect
+        val step = maxOf(1000L, (end - start) / 300) // ca. 30 s Abspieldauer
+        var t = replayT?.takeIf { it < end } ?: start
+        while (playing && t < end) { t = minOf(end, t + step); replayT = t; kotlinx.coroutines.delay(100) }
+        playing = false
+    }
 
     var centered by remember { mutableStateOf(false) }
     LaunchedEffect(st, fix) {
@@ -140,6 +155,24 @@ fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () 
                         Toast.makeText(ctx, "Dein Standort ist noch nicht bekannt.", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text("⌖") }
+            }
+        }
+        val start = st.game.startedAt
+        val end = st.game.endedAt
+        if (st.game.status == "ended" && start != null && end != null && end > start) {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🎬 Wiederholung " + fmtDur((replayT ?: end) - start), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                        TextButton(onClick = { playing = !playing }) { Text(if (playing) "⏸️ Pause" else "▶️ Abspielen") }
+                        if (replayT != null) TextButton(onClick = { playing = false; replayT = null }) { Text("Ende") }
+                    }
+                    Slider(
+                        value = ((replayT ?: end) - start).toFloat(),
+                        onValueChange = { playing = false; replayT = start + it.toLong() },
+                        valueRange = 0f..(end - start).toFloat(),
+                    )
+                }
             }
         }
     }
@@ -250,7 +283,21 @@ private fun circle(m: MapView, center: GeoPoint, radius: Double, color: Int, fil
         infoWindow = null
     }
 
-private fun redraw(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
+private fun redraw(m: MapView, st: GameState, fix0: Loc?, serverNow: Long, replayT: Long? = null) {
+    // In der Wiederholung: nur die Route bis zum gewählten Zeitpunkt, Position = letzter Punkt davor
+    val fix = if (replayT != null) null else fix0
+    val shown = if (replayT == null) st else st.copy(
+        players = st.players.map { p ->
+            val tr = p.trail.filter { it.ts <= replayT }
+            p.copy(trail = tr, loc = tr.lastOrNull()?.let { Loc(it.lat, it.lng, 0.0, it.ts) })
+        },
+        pickups = emptyList(),
+        self = st.self.copy(quests = emptyList()),
+    )
+    redrawState(m, shown, fix, serverNow)
+}
+
+private fun redrawState(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
     val ctx = m.context
     val openId = m.overlays.filterIsInstance<Marker>().firstOrNull { it.isInfoWindowShown }?.id
     m.overlays.forEach { if (it is Marker) it.closeInfoWindow() }

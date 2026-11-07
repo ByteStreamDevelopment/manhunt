@@ -15,8 +15,8 @@ android {
         applicationId = "eu.nebendahl.manhunt"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0"
+        versionCode = 4
+        versionName = "2.1"
         // Server-Adresse der Manhunt-Website
         buildConfigField("String", "BASE_URL", "\"https://manhunt.nebendahl.eu\"")
     }

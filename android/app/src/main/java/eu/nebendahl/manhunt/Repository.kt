@@ -39,6 +39,14 @@ object GameRepository {
     /** Letzte Position war als „Mock“ (Fake-GPS) markiert. */
     @Volatile var lastFixMock = false
 
+    /** true, wenn man sich seit 2 Minuten kaum bewegt hat (dann fragt der Dienst GPS seltener ab, spart Akku). */
+    val stationary = MutableStateFlow(false)
+    /** Anzahl der Positionen, die im Funkloch gesammelt wurden und noch nachgereicht werden. */
+    val queued = MutableStateFlow(0)
+    private val offlineQueue = ArrayDeque<Pair<Loc, Boolean>>()
+    private var anchor: Loc? = null
+    private var lastMoveAt = 0L
+
     @Volatile private var nextSendAt = 0L
     @Volatile private var sending = false
     private val recentFixes = ArrayDeque<Pair<Loc, Boolean>>()
@@ -116,6 +124,8 @@ object GameRepository {
         myFix.value = null
         localLastPhoto.value = 0L
         nextSendAt = 0L
+        synchronized(offlineQueue) { offlineQueue.clear() }
+        queued.value = 0
     }
 
     fun ensureConnected() { if (job?.isActive != true) connect() }
@@ -211,6 +221,10 @@ object GameRepository {
             while (recentFixes.isNotEmpty() && now - recentFixes.first().first.ts > 15_000) recentFixes.removeFirst()
         }
         myFix.value = fix
+        // Bewegung erkennen: mehr als 25 m (bzw. Ungenauigkeit) vom Ankerpunkt weg
+        val a = anchor
+        if (a == null || haversine(a.lat, a.lng, lat, lng) > maxOf(25.0, minOf(acc, 60.0))) { anchor = fix; lastMoveAt = now }
+        stationary.value = now - lastMoveAt > 120_000
         sendIfDue(fix, mock)
         autoCollect(fix, mock)
     }
@@ -230,12 +244,28 @@ object GameRepository {
         sending = true
         scope.launch {
             try {
+                // Erst die im Funkloch gesammelten Positionen nachreichen (der Server nimmt nur neuere als die letzte an)
+                val pending = synchronized(offlineQueue) { offlineQueue.toList() }
+                if (pending.isNotEmpty()) {
+                    Api.postLocations(s.code, s.token, pending)
+                    synchronized(offlineQueue) { repeat(pending.size) { if (offlineQueue.isNotEmpty()) offlineQueue.removeFirst() } }
+                    queued.value = offlineQueue.size
+                }
                 val next = Api.postLocation(s.code, s.token, fix.lat, fix.lng, fix.acc, mock)
                 if (next.ok) lastSentAt.value = System.currentTimeMillis()
                 // Etwas früher wieder senden dürfen, damit das Intervall nicht durch GPS-Verzögerung wächst
                 nextSendAt = System.currentTimeMillis() + (next.nextInMs * 0.85).toLong()
             } catch (e: ApiException) {
                 when {
+                    e.status == 0 -> {
+                        // Keine Verbindung: Position merken (in Server-Zeit) und später nachreichen
+                        synchronized(offlineQueue) {
+                            offlineQueue.addLast(fix.copy(ts = fix.ts + clockOffset) to mock)
+                            while (offlineQueue.size > 500) offlineQueue.removeFirst()
+                        }
+                        queued.value = offlineQueue.size
+                        nextSendAt = System.currentTimeMillis() + maxOf(5_000L, st.self.sendIntervalSec * 1000L)
+                    }
                     e.status == 401 || e.status == 404 -> onFailure(e)
                     e.data.optBoolean("spoof") || e.data.optBoolean("vpn") -> {
                         error.value = e.message
@@ -286,6 +316,28 @@ object GameRepository {
     suspend fun useAbility(key: String, targetId: String?) {
         val s = session.value ?: return
         withContext(Dispatchers.IO) { Api.useAbility(s.code, s.token, key, targetId); runCatching { refresh(s) } }
+    }
+
+    /* ---------------- Team-Chat ---------------- */
+
+    suspend fun sendChat(text: String) {
+        val s = session.value ?: return
+        withContext(Dispatchers.IO) { Api.sendChat(s.code, s.token, text); runCatching { refresh(s) } }
+    }
+
+    suspend fun sendVoice(audio: ByteArray, durSec: Int) {
+        val s = session.value ?: return
+        withContext(Dispatchers.IO) { Api.sendVoice(s.code, s.token, audio, durSec); runCatching { refresh(s) } }
+    }
+
+    /** Sprachnachricht als Datei im Cache (zum Abspielen mit MediaPlayer). */
+    suspend fun voiceFile(ctx: Context, id: String): java.io.File? {
+        val s = session.value ?: return null
+        val f = java.io.File(java.io.File(ctx.cacheDir, "voice").apply { mkdirs() }, "$id.m4a")
+        if (f.exists() && f.length() > 0) return f
+        return withContext(Dispatchers.IO) {
+            try { f.writeBytes(Api.voiceBytes(s.code, s.token, id)); f } catch (e: Exception) { null }
+        }
     }
 
     suspend fun markCaught(playerId: String, caught: Boolean) {

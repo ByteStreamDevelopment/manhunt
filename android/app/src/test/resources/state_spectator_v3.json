@@ -1,0 +1,407 @@
+{
+  "now": 1794012719934,
+  "game": {
+    "code": "LYF6Z",
+    "name": "Fixture2",
+    "status": "running",
+    "startedAt": 1794012718312,
+    "endedAt": null,
+    "releaseAt": 1794012718312
+  },
+  "settings": {
+    "locationIntervalSec": 60,
+    "headStartMin": 0,
+    "autoEndAfterMin": 0,
+    "showTrail": true,
+    "fuzzMeters": 0,
+    "huntersVisibleToHunters": true,
+    "huntersVisibleToRunners": false,
+    "runnersVisibleToRunners": true,
+    "showDistance": true,
+    "photosEnabled": true,
+    "photoIntervalMin": 15,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 60,
+    "livePenaltyUntil": "nextRound",
+    "liveIntervalSec": 5,
+    "caughtEnabled": true,
+    "caughtBecomeHunter": true,
+    "freezeImmunitySec": 120,
+    "chatEnabled": true,
+    "voiceEnabled": true,
+    "spectatorsEnabled": true,
+    "spectatorDelaySec": 90,
+    "autoEndWhenAllCaught": true,
+    "zoneEnabled": false,
+    "zoneLat": 0,
+    "zoneLng": 0,
+    "zoneRadiusM": 1000,
+    "abilitiesEnabled": true,
+    "questsEnabled": false,
+    "questIntervalMin": 8,
+    "questMaxActive": 1,
+    "pickupsEnabled": false,
+    "pickupIntervalMin": 4,
+    "pickupMax": 6,
+    "pickupSpacingM": 1000,
+    "pickupCollectM": 40,
+    "pickupLifetimeMin": 30,
+    "pickupSearchM": 3000,
+    "pickupRandomFallback": true,
+    "antiVpn": "warn",
+    "antiSpoof": "warn",
+    "maxSpeedKmh": 45,
+    "abilities": {
+      "freeze": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 90,
+        "cooldownSec": 300
+      },
+      "cloak": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 240
+      },
+      "decoy": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      },
+      "fog": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 180
+      },
+      "photoJoker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "rescue": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 300
+      },
+      "radar": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 300
+      },
+      "ping": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 60,
+        "cooldownSec": 120
+      },
+      "photoOrder": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 120,
+        "cooldownSec": 300
+      },
+      "tracker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      },
+      "thaw": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "shield": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      }
+    },
+    "quests": {
+      "r_red": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_tourist": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_number": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_safari": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_courier": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_shopping": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_dare": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 90,
+        "reward": "random"
+      },
+      "r_statue": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_edge": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_sprint": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_loot": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_patrol": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_scent": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 70,
+        "reward": "random"
+      },
+      "h_bounty": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 120,
+        "reward": "random"
+      },
+      "h_pincer": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 100,
+        "reward": "random"
+      },
+      "h_chase": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_outpost": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_paparazzi": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 80,
+        "reward": "random"
+      },
+      "h_collector": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_sweep": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 40,
+        "reward": "random"
+      }
+    }
+  },
+  "self": {
+    "id": "be71be04",
+    "name": "Zoe",
+    "role": "spectator",
+    "caught": false,
+    "lastLocTs": null,
+    "points": 0,
+    "abilities": [],
+    "quests": [],
+    "inbox": [],
+    "frozenUntil": null,
+    "live": null,
+    "liveUntil": null,
+    "penalty": null,
+    "photoOrderDue": null,
+    "sendIntervalSec": 60,
+    "converted": false,
+    "cooldowns": [],
+    "spectatorDelaySec": 90
+  },
+  "players": [
+    {
+      "id": "4ab7b608",
+      "name": "Rita",
+      "role": "hunter",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": true
+    },
+    {
+      "id": "bd09d77f",
+      "name": "Rolf",
+      "role": "runner",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": false
+    },
+    {
+      "id": "f04785b7",
+      "name": "Hans",
+      "role": "hunter",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": true,
+      "converted": false
+    },
+    {
+      "id": "be71be04",
+      "name": "Zoe",
+      "role": "spectator",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": false
+    }
+  ],
+  "photos": [],
+  "messages": [
+    {
+      "id": "71c8fd",
+      "ts": 1794012718305,
+      "text": "Rita ist als Runner beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "822a8a",
+      "ts": 1794012718307,
+      "text": "Rolf ist als Runner beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "a2e58c",
+      "ts": 1794012718309,
+      "text": "Hans ist als Hunter beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "fcb2fe",
+      "ts": 1794012718310,
+      "text": "Zoe schaut zu.",
+      "kind": "system"
+    },
+    {
+      "id": "ea76ea",
+      "ts": 1794012718312,
+      "text": "Das Spiel läuft!",
+      "kind": "system"
+    },
+    {
+      "id": "bf31f7",
+      "ts": 1794012718317,
+      "text": "🧊 Ein Runner hat die Hunter eingefroren!",
+      "kind": "system"
+    },
+    {
+      "id": "be8e27",
+      "ts": 1794012719927,
+      "text": "Rita wurde gefangen und ist jetzt Hunter!",
+      "kind": "system"
+    }
+  ],
+  "effects": [
+    {
+      "id": "f8b1d505",
+      "key": "freeze",
+      "team": "runner",
+      "byName": "Rolf",
+      "at": 1794012718317,
+      "until": 1794012808317,
+      "onMe": false
+    }
+  ],
+  "chat": [],
+  "pickups": []
+}

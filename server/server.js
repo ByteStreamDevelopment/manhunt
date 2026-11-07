@@ -8,7 +8,8 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { ABILITIES, QUESTS, POINTS, catalogForClients } = require('./lib/catalog');
+const { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients } = require('./lib/catalog');
+const { Store } = require('./lib/store');
 const { haversine, offset, randomPointAround, fetchPois } = require('./lib/geo');
 const { detectVpn, checkSpoof } = require('./lib/anticheat');
 const smtp = require('./lib/smtp');
@@ -18,7 +19,12 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const PHOTO_DIR = path.join(DATA_DIR, 'photos');
 const GALLERY_DIR = path.join(DATA_DIR, 'gallery');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_FILE = path.join(DATA_DIR, 'db.json'); // altes Format, wird beim Start übernommen
+const SQLITE_FILE = path.join(DATA_DIR, 'manhunt.sqlite');
+const VOICE_DIR = path.join(DATA_DIR, 'voice');
+const MAX_VOICE_BYTES = 1024 * 1024;
+/** Standortdaten beendeter Spiele werden nach so vielen Tagen gelöscht (0 = nie). */
+const RETENTION_DAYS = Number(process.env.RETENTION_DAYS ?? 30);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_PLAYERS = 60;
@@ -30,6 +36,7 @@ const ADMIN_USERNAMES = String(process.env.ADMIN_USERNAMES || 'ProfImpossible,Mr
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 fs.mkdirSync(GALLERY_DIR, { recursive: true });
+fs.mkdirSync(VOICE_DIR, { recursive: true });
 
 let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 if (!ADMIN_PASSWORD) {
@@ -42,7 +49,7 @@ if (!ADMIN_PASSWORD) {
 /* ------------------------------------------------------------------ */
 function defaultAbilities() {
   const o = {};
-  for (const [k, a] of Object.entries(ABILITIES)) o[k] = { enabled: true, start: a.start, obtainable: a.obtainable, durationSec: a.durationSec };
+  for (const [k, a] of Object.entries(ABILITIES)) o[k] = { enabled: true, start: a.start, obtainable: a.obtainable, durationSec: a.durationSec, cooldownSec: a.cooldownSec || 0 };
   return o;
 }
 function defaultQuests() {
@@ -67,6 +74,12 @@ const DEFAULTS = {
   livePenaltyUntil: 'nextRound', // 'nextRound': live bis zum Foto der nächsten Runde, 'upload': bis zum nächsten Foto
   liveIntervalSec: 5,            // Intervall im Live-Modus
   caughtEnabled: true,           // "Gefangen"-Funktion
+  caughtBecomeHunter: true,      // Gefangene Runner spielen als Hunter weiter
+  freezeImmunitySec: 120,        // nach einem Freeze sind Hunter so lange immun gegen den nächsten
+  chatEnabled: true,             // Team-Chat
+  voiceEnabled: true,            // Sprachnachrichten im Team-Chat
+  spectatorsEnabled: true,       // Zuschauer dürfen beitreten
+  spectatorDelaySec: 120,        // Zuschauer sehen Positionen so viel später (damit sie nichts verraten)
   autoEndWhenAllCaught: true,    // Spiel endet, wenn alle Runner gefangen sind
   zoneEnabled: false,            // Spielzone (Kreis) mit Warnung bei Verlassen
   zoneLat: 0,
@@ -96,7 +109,7 @@ const LIMITS = {
   zoneLat: [-90, 90], zoneLng: [-180, 180], photoGraceSec: [0, 3600], liveIntervalSec: [3, 60],
   questIntervalMin: [1, 120], questMaxActive: [1, 5], pickupIntervalMin: [1, 120], pickupMax: [0, 50],
   pickupSpacingM: [1000, 20000], pickupCollectM: [15, 200], pickupLifetimeMin: [2, 600], pickupSearchM: [300, 10000],
-  maxSpeedKmh: [10, 500],
+  maxSpeedKmh: [10, 500], freezeImmunitySec: [0, 1800], spectatorDelaySec: [0, 1800],
 };
 const ENUMS = { livePenaltyUntil: ['nextRound', 'upload'], antiVpn: ['off', 'warn', 'block'], antiSpoof: ['off', 'warn', 'block'] };
 const toBool = (v) => v === true || v === 'true';
@@ -128,6 +141,7 @@ function sanitizeSettings(input, base = DEFAULTS) {
         start: 'start' in v ? Math.round(clampNum(v.start, 0, 20, cur.start)) : cur.start,
         obtainable: 'obtainable' in v ? toBool(v.obtainable) : cur.obtainable,
         durationSec: def.durationSec === 0 ? 0 : ('durationSec' in v ? Math.round(clampNum(v.durationSec, 10, 3600, cur.durationSec)) : cur.durationSec),
+        cooldownSec: 'cooldownSec' in v ? Math.round(clampNum(v.cooldownSec, 0, 3600, cur.cooldownSec ?? 0)) : (cur.cooldownSec ?? def.cooldownSec ?? 0),
       };
     }
   }
@@ -150,31 +164,77 @@ function sanitizeSettings(input, base = DEFAULTS) {
 /* ------------------------------------------------------------------ */
 /* Datenhaltung (JSON-Datei, atomar geschrieben)                        */
 /* ------------------------------------------------------------------ */
-let db = { games: {}, accounts: {}, gallery: [], secret: '' };
-try { db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }; } catch { /* neu */ }
+const store = new Store(SQLITE_FILE);
+if (store.migrateJson(DB_FILE)) console.log('[manhunt] Alte db.json nach SQLite übernommen (db.json.migrated).');
+let db = store.load();
 if (!db.secret) db.secret = crypto.randomBytes(32).toString('hex');
 db.accounts ||= {}; db.gallery ||= [];
 // Ältere Spielstände auf das aktuelle Format bringen
 for (const g of Object.values(db.games)) {
   g.settings = sanitizeSettings(g.settings, g.settings || DEFAULTS);
-  g.effects ||= []; g.pickups ||= []; g.photos ||= []; g.messages ||= []; g.locations ||= [];
+  g.effects ||= []; g.pickups ||= []; g.photos ||= []; g.messages ||= []; g.locations ||= []; g.chat ||= [];
   for (const p of Object.values(g.players)) migratePlayer(p);
+  indexLocations(g);
 }
 function migratePlayer(p) {
-  p.abilities ||= {}; p.quests ||= []; p.inbox ||= []; p.flags ||= {}; p.points ||= 0; p.jokers ||= [];
+  p.abilities ||= {}; p.quests ||= []; p.inbox ||= []; p.flags ||= {}; p.points ||= 0; p.jokers ||= []; p.cooldowns ||= {};
   if (p.penalty === undefined) p.penalty = null;
   return p;
 }
+
+/* ---------------- Standorte: im Speicher pro Spieler indiziert, in SQLite angehängt ---------------- */
+function indexLocations(g) {
+  g._byPid = new Map();
+  for (const l of g.locations) {
+    if (!g._byPid.has(l.pid)) g._byPid.set(l.pid, []);
+    g._byPid.get(l.pid).push(l);
+  }
+}
+const locsOf = (g, pid) => (g._byPid && g._byPid.get(pid)) || [];
+function addLocation(g, l) {
+  g.locations.push(l);
+  if (!g._byPid) indexLocations(g);
+  if (!g._byPid.has(l.pid)) g._byPid.set(l.pid, []);
+  const arr = g._byPid.get(l.pid);
+  // Nachgereichte (offline gesammelte) Positionen chronologisch einsortieren
+  if (arr.length && arr[arr.length - 1].ts > l.ts) { arr.push(l); arr.sort((a, b) => a.ts - b.ts); } else arr.push(l);
+  store.addLocation(g.code, l);
+  if (g.locations.length > MAX_LOCATIONS) {
+    const cut = g.locations[g.locations.length - MAX_LOCATIONS].ts;
+    g.locations = g.locations.filter((x) => x.ts >= cut);
+    indexLocations(g);
+    store.trimLocations(g.code, cut);
+  }
+}
+function clearLocations(g, pid) {
+  if (pid) g.locations = g.locations.filter((l) => l.pid !== pid); else g.locations = [];
+  indexLocations(g);
+  store.deleteLocations(g.code, pid);
+}
+
 let saveTimer = null;
 function save() { if (!saveTimer) saveTimer = setTimeout(flush, 400); }
 function flush() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db));
-  fs.renameSync(tmp, DB_FILE);
+  try { store.flush(db); } catch (e) { console.error('[manhunt] Speichern fehlgeschlagen:', e); }
 }
 flush();
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flush(); process.exit(0); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flush(); store.close(); process.exit(0); });
+
+/* Datenschutz: Standortdaten beendeter Spiele nach RETENTION_DAYS löschen (stündlich geprüft) */
+function applyRetention() {
+  if (!(RETENTION_DAYS > 0)) return;
+  const cutoff = Date.now() - RETENTION_DAYS * 864e5;
+  for (const g of Object.values(db.games)) {
+    if (g.status === 'ended' && g.endedAt && g.endedAt < cutoff && g.locations.length) {
+      clearLocations(g);
+      for (const p of Object.values(g.players)) p.lastLoc = null;
+      save();
+    }
+  }
+}
+applyRetention();
+setInterval(applyRetention, 3600e3).unref();
 
 /* ------------------------------------------------------------------ */
 /* Hilfsfunktionen                                                     */
@@ -231,7 +291,23 @@ function fuzzPoint(seed, lat, lng, meters) {
     lng + (rad * Math.sin(ang)) / (111320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180))),
   ];
 }
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+/**
+ * IP-Adresse des Clients. X-Forwarded-For wird nur ausgewertet, wenn die Anfrage von einem Proxy im eigenen Netz
+ * kommt (z. B. Caddy im Docker-Netz). Sonst könnte jeder den Header fälschen und die Bremse gegen Durchprobieren umgehen.
+ * TRUST_PROXY=always|never|private (Standard private).
+ */
+const TRUST_PROXY = process.env.TRUST_PROXY || 'private';
+const PRIVATE_RE = /^(::ffff:)?(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/i;
+function clientIp(req) {
+  const remote = String(req.socket.remoteAddress || '');
+  const xff = String(req.headers['x-forwarded-for'] || '');
+  const trust = TRUST_PROXY === 'always' || (TRUST_PROXY === 'private' && PRIVATE_RE.test(remote));
+  if (trust && xff) {
+    const parts = xff.split(',').map((x) => x.trim()).filter(Boolean);
+    return parts[parts.length - 1] || remote; // letzter Eintrag = vom eigenen Proxy angehängt
+  }
+  return remote;
+}
 
 /* Einfacher Bremsklotz gegen Durchprobieren (pro IP und Zweck) */
 const limiter = new Map();
@@ -252,7 +328,10 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]{3,20}$/;
 const EMAIL_RE = /^[^\s@<>()\[\],;:"]+@[^\s@<>()\[\],;:"]+\.[^\s@<>()\[\],;:"]{2,}$/;
 const isAdminAccount = (a) => !!a && ADMIN_USERNAMES.includes(a.username.toLowerCase());
 function emptyStats() {
-  return { points: 0, games: 0, wins: 0, catches: 0, caught: 0, quests: 0, pickups: 0, photos: 0, abilities: 0, featured: 0, surviveMin: 0 };
+  return {
+    points: 0, games: 0, wins: 0, catches: 0, caught: 0, quests: 0, pickups: 0, photos: 0, abilities: 0, featured: 0, surviveMin: 0,
+    cleanEscapes: 0, freezes: 0, radars: 0, revenge: 0, chats: 0,
+  };
 }
 function hashPassword(pw, salt) { return crypto.scryptSync(String(pw), salt, 64).toString('hex'); }
 function findAccount(login) {
@@ -271,7 +350,7 @@ function accountFromToken(t) {
   return safeEq(sig || '', hmac(`acc|${id}|${exp}|${a.tokenVersion || 0}`)) ? a : null;
 }
 function publicAccount(a) {
-  return { id: a.id, username: a.username, email: a.email, verified: !!a.verified, isAdmin: isAdminAccount(a), stats: a.stats, createdAt: a.createdAt };
+  return { id: a.id, username: a.username, email: a.email, verified: !!a.verified, isAdmin: isAdminAccount(a), stats: { ...emptyStats(), ...a.stats }, badges: Object.keys(a.badges || {}), createdAt: a.createdAt };
 }
 async function sendCode(a, purpose) {
   const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
@@ -361,6 +440,9 @@ async function handleAuth(req, res, p) {
   }
   throw new HttpError(404, 'Nicht gefunden');
 }
+// Abzeichen für bestehende Accounts nachtragen
+for (const a of Object.values(db.accounts)) { a.stats = { ...emptyStats(), ...(a.stats || {}) }; checkBadges(a, null); }
+
 function loginResponse(a) {
   return { token: makeAccountToken(a), account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken() : undefined };
 }
@@ -370,9 +452,19 @@ function award(pl, field, points = 0, amount = 1) {
   pl.points = (pl.points || 0) + points;
   const a = pl.accountId && db.accounts[pl.accountId];
   if (a) {
-    a.stats ||= emptyStats();
+    a.stats = { ...emptyStats(), ...(a.stats || {}) };
     a.stats.points += points;
     if (field) a.stats[field] = (a.stats[field] || 0) + amount;
+    checkBadges(a, pl);
+  }
+}
+/** Neue Abzeichen vergeben (einmalig, mit Meldung an den Spieler). */
+function checkBadges(a, pl) {
+  a.badges ||= {};
+  for (const b of BADGES) {
+    if (a.badges[b.key] || (a.stats[b.stat] || 0) < b.min) continue;
+    a.badges[b.key] = Date.now();
+    if (pl && pl.inbox) inbox(pl, `🏅 Neues Abzeichen: ${b.icon} ${b.name} – ${b.desc}`, 'reward');
   }
 }
 
@@ -384,7 +476,7 @@ function newGame(name, settings) {
   db.games[code] = {
     code, name, status: 'lobby', createdAt: Date.now(), startedAt: null, endedAt: null,
     settings: sanitizeSettings(settings), players: {}, locations: [], photos: [], messages: [],
-    effects: [], pickups: [], nextPickupAt: 0,
+    effects: [], pickups: [], nextPickupAt: 0, chat: [], _byPid: new Map(),
   };
   save();
   return db.games[code];
@@ -404,12 +496,15 @@ function inbox(pl, text, kind = 'info') {
   if (pl.inbox.length > 25) pl.inbox.splice(0, pl.inbox.length - 25);
 }
 const runnersOf = (g) => Object.values(g.players).filter((p) => p.role === 'runner');
+/** Alle, die als Runner angefangen haben (auch gefangene, die zu Huntern übergelaufen sind) */
+const originalRunners = (g) => Object.values(g.players).filter((p) => p.role === 'runner' || p.converted);
+const isPlaying = (p) => p.role === 'runner' || p.role === 'hunter';
 const huntersOf = (g) => Object.values(g.players).filter((p) => p.role === 'hunter');
 const abilityCfg = (g, k) => g.settings.abilities[k] || { enabled: false };
 const usableBy = (k, role) => ABILITIES[k] && (ABILITIES[k].team === role || ABILITIES[k].team === 'any');
 
 function giveStartAbilities(g, pl) {
-  if (pl.gotStart || !g.settings.abilitiesEnabled) return;
+  if (pl.gotStart || !g.settings.abilitiesEnabled || !isPlaying(pl)) return;
   pl.gotStart = true;
   for (const k of Object.keys(ABILITIES)) {
     const c = abilityCfg(g, k);
@@ -449,22 +544,45 @@ function endGame(g, reason, winner = null) {
   pushMsg(g, `Spiel beendet: ${reason}`);
   for (const p of Object.values(g.players)) {
     p.penalty = null;
+    if (!isPlaying(p)) continue; // Zuschauer
     award(p, 'games', 0);
-    if (p.role === 'runner' && g.startedAt) {
-      const min = Math.floor(((p.caught ? p.caughtAt || now : now) - g.startedAt) / 60000);
+    if ((p.role === 'runner' || p.converted) && g.startedAt) {
+      const min = Math.floor(((p.caught || p.converted ? p.caughtAt || now : now) - g.startedAt) / 60000);
       award(p, 'surviveMin', min * POINTS.survivePerMin, min);
     }
+    // Übergelaufene zählen beim Sieg der Hunter mit
     if (winner === 'hunters' && p.role === 'hunter') award(p, 'wins', POINTS.caughtByHunterWin);
-    if (winner === 'runners' && p.role === 'runner' && !p.caught) award(p, 'wins', POINTS.runnerWin);
+    if (winner === 'runners' && p.role === 'runner' && !p.caught) {
+      award(p, 'wins', POINTS.runnerWin);
+      if (!p.wasLive) award(p, 'cleanEscapes', 0);
+    }
   }
 }
 function resetGame(g) {
   g.status = 'lobby'; g.startedAt = null; g.endedAt = null;
-  g.locations = []; g.photos = []; g.messages = []; g.effects = []; g.pickups = [];
-  deletePhotoFiles(g.code);
+  clearLocations(g); g.photos = []; g.messages = []; g.effects = []; g.pickups = []; g.chat = [];
+  deletePhotoFiles(g.code); deleteVoiceFiles(g.code);
   for (const p of Object.values(g.players)) {
-    Object.assign(p, { caught: false, caughtAt: null, caughtBy: null, lastLoc: null, abilities: {}, quests: [], inbox: [], penalty: null, photoOrder: null, points: 0, gotStart: false, jokers: [], flags: {} });
+    // Übergelaufene werden wieder Runner
+    if (p.converted) p.role = 'runner';
+    Object.assign(p, { caught: false, caughtAt: null, caughtBy: null, converted: false, wasLive: false, lastLoc: null, abilities: {}, cooldowns: {}, quests: [], inbox: [], penalty: null, photoOrder: null, points: 0, gotStart: false, jokers: [], flags: {} });
   }
+}
+const chatLast = new Map();
+function chatGate(pl) {
+  const last = chatLast.get(pl.id) || 0;
+  if (Date.now() - last < 1500) throw new HttpError(429, 'Nicht so schnell');
+  chatLast.set(pl.id, Date.now());
+}
+function pushChat(g, pl, msg) {
+  g.chat.push({ id: rid(4), ts: Date.now(), pid: pl.id, name: pl.name, team: pl.role, text: msg.text || '', voice: msg.voice || null });
+  if (g.chat.length > 300) {
+    for (const c of g.chat.splice(0, g.chat.length - 300)) if (c.voice) fs.unlink(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`), () => {});
+  }
+  award(pl, 'chats', 0);
+}
+function deleteVoiceFiles(code) {
+  try { for (const f of fs.readdirSync(VOICE_DIR)) if (f.startsWith(code + '_')) fs.unlinkSync(path.join(VOICE_DIR, f)); } catch { /* egal */ }
 }
 function deletePhotoFiles(code) {
   try {
@@ -473,27 +591,46 @@ function deletePhotoFiles(code) {
 }
 function checkAllCaught(g) {
   if (g.status !== 'running' || !g.settings.caughtEnabled || !g.settings.autoEndWhenAllCaught) return;
-  const runners = runnersOf(g);
-  if (runners.length && runners.every((p) => p.caught)) endGame(g, 'Alle Runner wurden gefangen. Die Hunter gewinnen!', 'hunters');
+  const runners = originalRunners(g);
+  if (runners.length && runners.every((p) => p.caught || p.converted)) endGame(g, 'Alle Runner wurden gefangen. Die Hunter gewinnen!', 'hunters');
 }
 function setCaught(g, target, value, by) {
-  if (target.caught === value) return;
-  target.caught = value;
+  const s = g.settings;
+  const isCaught = target.caught || target.converted;
+  if (isCaught === value) return;
   if (value) {
-    target.caughtAt = Date.now(); target.penalty = null; target.quests = target.quests.filter((q) => q.status !== 'active');
+    target.caught = true; target.caughtAt = Date.now(); target.penalty = null; target.photoOrder = null;
+    target.quests = target.quests.filter((q) => q.status !== 'active');
     award(target, 'caught', 0);
     if (by && by.role === 'hunter') {
       target.caughtBy = by.id;
       award(by, 'catches', POINTS.catch);
+      if (by.converted) award(by, 'revenge', 0);
       completeQuestsOfKind(g, by, 'catch');
     }
+    if (s.caughtBecomeHunter && g.status === 'running') {
+      // Seitenwechsel: Runner-Fähigkeiten weg, Hunter-Startausstattung dazu
+      target.converted = true; target.caught = false; target.role = 'hunter';
+      target.abilities = {}; target.cooldowns = {}; target.gotStart = false;
+      giveStartAbilities(g, target);
+      target.nextQuestAt = Date.now() + 60000;
+      inbox(target, '🔄 Du wurdest gefangen und jagst jetzt als Hunter mit!', 'bad');
+      pushMsg(g, `${target.name} wurde gefangen und ist jetzt Hunter!`);
+    } else {
+      pushMsg(g, `${target.name} wurde gefangen!`);
+    }
   } else {
-    // Rückgängig: Punkte des Fängers wieder abziehen
+    // Rückgängig: Punkte des Fängers wieder abziehen, ggf. zurück ins Runner-Team
     const by2 = target.caughtBy && g.players[target.caughtBy];
     if (by2) award(by2, 'catches', -POINTS.catch, -1);
-    target.caughtBy = null; target.caughtAt = null;
+    if (target.converted) {
+      target.converted = false; target.role = 'runner'; target.abilities = {}; target.cooldowns = {}; target.gotStart = false;
+      giveStartAbilities(g, target);
+      target.quests = target.quests.filter((q) => q.status !== 'active');
+    }
+    target.caught = false; target.caughtBy = null; target.caughtAt = null;
+    pushMsg(g, `${target.name} ist wieder als Runner im Spiel.`);
   }
-  pushMsg(g, value ? `${target.name} wurde gefangen!` : `${target.name} ist wieder im Spiel.`);
   checkAllCaught(g);
 }
 
@@ -522,6 +659,8 @@ function useAbility(g, pl, key, targetId) {
   if (!usableBy(key, pl.role)) throw new HttpError(403, 'Diese Fähigkeit ist nicht für dein Team');
   if (pl.caught) throw new HttpError(409, 'Du bist gefangen');
   if (!(pl.abilities[key] > 0)) throw new HttpError(409, 'Du hast diese Fähigkeit nicht (mehr)');
+  const cdUntil = (pl.cooldowns || {})[key] || 0;
+  if (cdUntil > now) throw new HttpError(409, `Noch ${Math.ceil((cdUntil - now) / 1000)} s Abklingzeit`, { cooldownUntil: cdUntil });
   if (pl.role === 'hunter' && frozenUntil(g, pl.id, now) > now && !['thaw', 'shield'].includes(key)) throw new HttpError(409, 'Du bist eingefroren');
   if (pl.role === 'hunter' && !released(g, now) && !['shield', 'thaw'].includes(key)) throw new HttpError(409, 'Erst nach dem Vorsprung der Runner');
   const dur = abilityCfg(g, key).durationSec || def.durationSec;
@@ -531,10 +670,14 @@ function useAbility(g, pl, key, targetId) {
 
   switch (key) {
     case 'freeze': {
-      const t = unshieldedEnemies.map((p) => p.id);
-      if (!t.length) throw new HttpError(409, 'Alle Hunter sind gerade geschützt');
-      addEffect(g, key, pl, t, dur);
-      for (const p of unshieldedEnemies) inbox(p, `🧊 Du bist ${Math.round(dur / 60 * 10) / 10} Minuten eingefroren!`, 'bad');
+      // Kein Dauer-Freeze: wer gerade eingefroren ist oder es eben war, ist eine Weile immun
+      const immune = (h) => g.effects.some((e) => e.key === 'freeze' && e.targets.includes(h.id) && (e.until > now || (e.data && e.data.immuneUntil > now)));
+      const targets = unshieldedEnemies.filter((h) => !immune(h));
+      if (!targets.length) throw new HttpError(409, unshieldedEnemies.length ? 'Die Hunter sind gerade noch immun gegen Freeze' : 'Alle Hunter sind gerade geschützt');
+      const t = targets.map((p) => p.id);
+      addEffect(g, key, pl, t, dur, { immuneUntil: now + (dur + g.settings.freezeImmunitySec) * 1000 });
+      award(pl, 'freezes', 0);
+      for (const p of targets) inbox(p, `🧊 Du bist ${Math.round(dur / 60 * 10) / 10} Minuten eingefroren!`, 'bad');
       msg = `🧊 Ein Runner hat die Hunter eingefroren!`;
       break;
     }
@@ -557,16 +700,19 @@ function useAbility(g, pl, key, targetId) {
       break;
     case 'rescue': {
       const t = g.players[targetId];
-      if (!t || t.role !== 'runner' || !t.caught) throw new HttpError(400, 'Bitte einen gefangenen Runner auswählen');
+      if (!t || !(t.converted || (t.role === 'runner' && t.caught))) throw new HttpError(400, 'Bitte einen gefangenen Runner auswählen');
       setCaught(g, t, false, null);
       inbox(t, `🔓 ${pl.name} hat dich befreit!`, 'good');
       msg = `🔓 ${pl.name} hat ${t.name} befreit!`;
       break;
     }
     case 'radar': {
+      if (activeEffects(g, now).some((e) => e.key === 'radar')) throw new HttpError(409, 'Das Radar läuft schon');
       const t = unshieldedEnemies.map((p) => p.id);
       if (!t.length) throw new HttpError(409, 'Alle Runner sind gerade geschützt');
       addEffect(g, key, pl, t, dur);
+      award(pl, 'radars', 0);
+      for (const p of unshieldedEnemies) p.wasLive = true;
       for (const p of unshieldedEnemies) inbox(p, '📡 Radar! Dein Standort ist jetzt live für die Hunter sichtbar.', 'bad');
       msg = `📡 ${pl.name} hat das Radar eingeschaltet – alle Runner sind live sichtbar!`;
       break;
@@ -577,6 +723,7 @@ function useAbility(g, pl, key, targetId) {
       if (!cand.length) throw new HttpError(409, 'Kein Runner kann gerade angepeilt werden');
       const t = me ? cand.reduce((a, b) => (haversine(me.lat, me.lng, a.lastLoc.lat, a.lastLoc.lng) <= haversine(me.lat, me.lng, b.lastLoc.lat, b.lastLoc.lng) ? a : b)) : pick(cand);
       addEffect(g, key, pl, [t.id], dur);
+      t.wasLive = true;
       inbox(t, '🎯 Du wurdest angepeilt! Dein Standort ist eine Minute lang live.', 'bad');
       for (const h of huntersOf(g)) inbox(h, `🎯 ${pl.name} peilt ${t.name} an.`, 'info');
       break;
@@ -607,6 +754,8 @@ function useAbility(g, pl, key, targetId) {
   }
   pl.abilities[key]--;
   if (pl.abilities[key] <= 0) delete pl.abilities[key];
+  const cd = abilityCfg(g, key).cooldownSec ?? def.cooldownSec ?? 0;
+  if (cd > 0) { pl.cooldowns ||= {}; pl.cooldowns[key] = now + cd * 1000; }
   award(pl, 'abilities', POINTS.abilityUsed);
   if (msg) pushMsg(g, msg);
 }
@@ -636,7 +785,7 @@ function updatePenalties(g, now) {
     if (pl.photoOrder && now > pl.photoOrder.due) {
       pl.photoOrder = null;
       if (s.livePenaltyEnabled && !pl.penalty) {
-        pl.penalty = { reason: 'order', since: now, round: roundOf(g, now) };
+        pl.penalty = { reason: 'order', since: now, round: roundOf(g, now) }; pl.wasLive = true;
         inbox(pl, '⚠️ Fotobefehl verpasst – dein Standort ist live, bis du ein Foto hochlädst.', 'bad');
         pushMsg(g, `📸 ${pl.name} hat den Fotobefehl verpasst – Standort ist live!`); changed = true;
       }
@@ -647,7 +796,7 @@ function updatePenalties(g, now) {
     const rs = g.startedAt + slot * s.photoIntervalMin * 60000;
     if (now < rs + s.photoGraceSec * 1000 || hasCreditInRound(g, pl, slot)) continue;
     if (!pl.penalty) {
-      pl.penalty = { reason: 'photo', since: now, round: slot };
+      pl.penalty = { reason: 'photo', since: now, round: slot }; pl.wasLive = true;
       inbox(pl, s.livePenaltyUntil === 'upload'
         ? '⚠️ Foto zu spät – dein Standort ist live, bis du ein Foto hochlädst.'
         : '⚠️ Foto zu spät – dein Standort ist live, bis du in der nächsten Runde ein Foto hochlädst.', 'bad');
@@ -725,13 +874,14 @@ function assignQuest(g, pl, now) {
 function completeQuest(g, pl, q) {
   if (q.status !== 'active') return;
   const def = QUESTS[q.key], cfg = questCfg(g, q.key);
-  q.status = 'done'; q.doneAt = Date.now();
+  q.status = 'done'; q.doneAt = Date.now(); q.pointsAwarded = cfg.points;
   award(pl, 'quests', cfg.points);
   let got = null;
   if (cfg.reward === 'random') got = grantRandomAbility(g, pl);
   else if (cfg.reward !== 'none' && ABILITIES[cfg.reward] && abilityCfg(g, cfg.reward).enabled && usableBy(cfg.reward, pl.role)) {
     pl.abilities[cfg.reward] = (pl.abilities[cfg.reward] || 0) + 1; got = cfg.reward;
   }
+  q.rewardKey = got;
   inbox(pl, `🏆 Quest geschafft: ${def.title} (+${cfg.points} Punkte${got ? `, ${ABILITIES[got].icon} ${ABILITIES[got].name}` : ''})`, 'reward');
 }
 function completeQuestsOfKind(g, pl, kind) {
@@ -751,22 +901,18 @@ function checkQuests(g, pl, now) {
         ok = me && me.ts >= q.start && haversine(me.lat, me.lng, q.target.lat, q.target.lng) <= q.target.radiusM + Math.min(me.acc || 0, 30);
         break;
       case 'distance': {
-        let d = 0, prev = null;
-        for (const l of g.locations) {
-          if (l.pid !== pl.id || l.ts < q.start) continue;
-          if (prev && (l.acc || 0) < 80) d += haversine(prev.lat, prev.lng, l.lat, l.lng);
-          prev = l;
-        }
-        q.progress = Math.round(d);
-        ok = d >= def.meters;
+        // wird in acceptLocation schrittweise mitgezählt (q.dist)
+        q.progress = Math.round(q.dist || 0);
+        ok = (q.dist || 0) >= def.meters;
         break;
       }
       case 'still': {
-        const mine = g.locations.filter((l) => l.pid === pl.id && l.ts >= q.start);
-        if (mine.length >= 2) {
+        // Nur die eigenen Positionen seit Quest-Start, rückwärts bis zur ersten Bewegung
+        const mine = locsOf(g, pl.id);
+        if (mine.length >= 2 && mine[mine.length - 1].ts >= q.start) {
           const last = mine[mine.length - 1];
           let first = last;
-          for (let i = mine.length - 1; i >= 0; i--) {
+          for (let i = mine.length - 1; i >= 0 && mine[i].ts >= q.start; i--) {
             if (haversine(mine[i].lat, mine[i].lng, last.lat, last.lng) > def.radiusM) break;
             first = mine[i];
           }
@@ -809,7 +955,7 @@ function updateQuests(g, now) {
   if (!g.settings.questsEnabled) return false;
   let changed = false;
   for (const pl of Object.values(g.players)) {
-    if (pl.caught) continue;
+    if (pl.caught || !isPlaying(pl)) continue;
     if (checkQuests(g, pl, now)) changed = true;
     const active = pl.quests.filter((q) => q.status === 'active').length;
     if (active < g.settings.questMaxActive && now >= (pl.nextQuestAt || 0) && (pl.role === 'runner' || released(g, now))) {
@@ -941,9 +1087,14 @@ function buildState(g, auth) {
   const releaseAt = g.startedAt ? g.startedAt + s.headStartMin * 60000 : null;
   const isReleased = released(g, now);
   const viewerFrozen = viewer && viewer.role === 'hunter' && g.status === 'running' ? frozenUntil(g, viewer.id, now) : 0;
+  // Zuschauer sehen alles exakt, aber zeitverzögert – so können sie Mitspielern nichts Aktuelles verraten
+  const isSpectator = viewerRole === 'spectator';
+  const spectatorCut = isSpectator && !ended ? now - s.spectatorDelaySec * 1000 : 0;
+  const overview = isAdmin || isSpectator; // Rundumsicht wie die Spielleitung
 
   const canSee = (t) => {
-    if (ended || isAdmin || (viewer && t.id === viewer.id)) return true;
+    if (!isPlaying(t) && !(viewer && t.id === viewer.id)) return false; // andere Zuschauer haben keine Position
+    if (ended || overview || (viewer && t.id === viewer.id)) return true;
     if (!active) return false;
     if (viewerRole === 'hunter') {
       if (t.role !== 'runner') return s.huntersVisibleToHunters;
@@ -955,12 +1106,12 @@ function buildState(g, auth) {
     return t.role === 'runner' ? s.runnersVisibleToRunners : s.huntersVisibleToRunners;
   };
 
-  const locsBy = {}; for (const l of g.locations) (locsBy[l.pid] ||= []).push(l);
   const photosBy = {}; for (const ph of g.photos) (photosBy[ph.pid] ||= []).push(ph);
 
   const players = Object.values(g.players).map((t) => {
     const vis = canSee(t);
-    const pts = vis ? locsBy[t.id] || [] : [];
+    let pts = vis ? locsOf(g, t.id) : [];
+    if (spectatorCut) pts = pts.filter((l) => l.ts <= spectatorCut); // Zuschauer sehen alles verzögert
     const hunterView = !ended && viewerRole === 'hunter' && t.role === 'runner';
     const live = liveReason(g, t, now);
     const decoy = hunterView && !live ? effectOn(g, 'decoy', t.id, now) : null;
@@ -976,8 +1127,8 @@ function buildState(g, auth) {
         const [la, ln] = conv(last);
         loc = { lat: la, lng: ln, acc: fuzzM > 0 ? Math.max(last.acc, fuzzM) : last.acc, ts: last.ts };
         const tracked = hunterView && hasEffect(g, 'tracker', t.id, now);
-        if (s.showTrail || ended || tracked || isAdmin) {
-          trail = (tracked || ended || isAdmin ? pts.slice(-1500) : pts.slice(-300)).map((l) => {
+        if (s.showTrail || ended || tracked || overview) {
+          trail = (tracked || ended || overview ? pts.slice(-1500) : pts.slice(-300)).map((l) => {
             const [a, b] = tracked ? [l.lat, l.lng] : conv(l); return [a, b, l.ts];
           });
         }
@@ -993,6 +1144,7 @@ function buildState(g, auth) {
       points: t.points || 0,
       live: vis && live ? live.reason : null,
       frozen: t.role === 'hunter' && g.status === 'running' && frozenUntil(g, t.id, now) > now,
+      converted: !!t.converted,
     };
     if (isAdmin) { out.flags = t.flags; out.abilities = t.abilities; out.penalty = t.penalty; }
     return out;
@@ -1001,8 +1153,8 @@ function buildState(g, auth) {
 
   // Effekte: eigenes Team, auf einen selbst gerichtete und (für Admins) alle
   const effects = activeEffects(g, now)
-    .filter((e) => isAdmin || ended || e.team === viewerRole || (viewer && e.targets.includes(viewer.id)) || ['freeze', 'radar', 'photoOrder'].includes(e.key))
-    .map((e) => ({ id: e.id, key: e.key, team: e.team, byName: e.team === viewerRole || isAdmin ? e.byName : null, at: e.at, until: e.until, onMe: !!(viewer && e.targets.includes(viewer.id)) }));
+    .filter((e) => overview || ended || e.team === viewerRole || (viewer && e.targets.includes(viewer.id)) || ['freeze', 'radar', 'photoOrder'].includes(e.key))
+    .map((e) => ({ id: e.id, key: e.key, team: e.team, byName: e.team === viewerRole || overview ? e.byName : null, at: e.at, until: e.until, onMe: !!(viewer && e.targets.includes(viewer.id)) }));
 
   let self;
   if (isAdmin) {
@@ -1021,8 +1173,16 @@ function buildState(g, auth) {
       penalty: viewer.penalty ? { reason: viewer.penalty.reason, since: viewer.penalty.since } : null,
       photoOrderDue: viewer.photoOrder ? viewer.photoOrder.due : null,
       sendIntervalSec: live ? s.liveIntervalSec : s.locationIntervalSec,
+      converted: !!viewer.converted,
+      cooldowns: Object.entries(viewer.cooldowns || {}).filter(([, t]) => t > now).map(([key, until]) => ({ key, until })),
+      spectatorDelaySec: isSpectator ? s.spectatorDelaySec : 0,
     };
   }
+  // Team-Chat: jeder sieht nur sein Team (Zuschauer unter sich), die Spielleitung alles
+  const chatTeam = isAdmin ? null : viewerRole;
+  const chat = (s.chatEnabled || isAdmin ? g.chat : [])
+    .filter((c) => isAdmin || c.team === chatTeam)
+    .slice(-80).map(({ id, ts, pid, name, team, text, voice }) => ({ id, ts, pid, name, team, text, voice: voice || null }));
   const gallerySet = new Set(db.gallery.map((x) => x.photoId));
   return {
     now,
@@ -1035,15 +1195,18 @@ function buildState(g, auth) {
     })),
     messages: g.messages.filter((m) => isAdmin || m.kind !== 'cheat').slice(-40),
     effects,
+    chat,
     pickups: g.status === 'running' ? g.pickups.filter((p) => !p.takenBy && p.until > now).map(({ id, lat, lng, name, kind, until }) => ({ id, lat, lng, name, kind, until })) : [],
   };
 }
+const roleText = (r) => (r === 'spectator' ? 'schaut jetzt zu' : `spielt jetzt als ${r === 'runner' ? 'Runner' : 'Hunter'}`);
 function adminSummary(g) {
   const ps = Object.values(g.players);
   return {
     code: g.code, name: g.name, status: g.status, createdAt: g.createdAt, startedAt: g.startedAt, endedAt: g.endedAt,
     settings: g.settings, runners: ps.filter((p) => p.role === 'runner').length, hunters: ps.filter((p) => p.role === 'hunter').length,
-    caught: ps.filter((p) => p.caught).length, photos: g.photos.length,
+    caught: ps.filter((p) => p.caught || p.converted).length, photos: g.photos.length,
+    spectators: ps.filter((p) => p.role === 'spectator').length,
     flagged: ps.filter((p) => p.flags && (p.flags.vpn || p.flags.spoof)).map((p) => ({ id: p.id, name: p.name, flags: p.flags })),
   };
 }
@@ -1081,7 +1244,7 @@ async function handleApi(req, res, url) {
   if (m === 'GET' && p === '/api/leaderboard') {
     const sort = ['points', 'wins', 'catches', 'quests', 'surviveMin', 'pickups', 'featured'].includes(url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'points';
     const rows = Object.values(db.accounts).filter((a) => a.verified)
-      .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats }))
+      .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats, badges: Object.keys(a.badges || {}) }))
       .filter((r) => r.games > 0 || r.points > 0)
       .sort((a, b) => b[sort] - a[sort] || b.points - a.points).slice(0, 100);
     return sendJSON(res, 200, { sort, rows });
@@ -1179,7 +1342,7 @@ async function handleAdmin(req, res, url) {
   const g = getGame(r[1]); const act = r[2];
 
   if (!act && m === 'DELETE') {
-    deletePhotoFiles(g.code); delete db.games[g.code]; save();
+    deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; save();
     return sendJSON(res, 200, { ok: true });
   }
   if (!act && m === 'PATCH') {
@@ -1195,7 +1358,7 @@ async function handleAdmin(req, res, url) {
     else if (act === 'end') endGame(g, 'Beendet von der Spielleitung.');
     else if (act === 'reset') resetGame(g);
     else if (act === 'announce') { const t = cleanText(b.text, 300); if (!t) throw new HttpError(400, 'Nachricht fehlt'); pushMsg(g, t, 'admin'); }
-    else if (act === 'kick') { delete g.players[b.playerId]; g.locations = g.locations.filter((l) => l.pid !== b.playerId); g.photos = g.photos.filter((x) => x.pid !== b.playerId); }
+    else if (act === 'kick') { delete g.players[b.playerId]; clearLocations(g, b.playerId); g.photos = g.photos.filter((x) => x.pid !== b.playerId); }
     else if (act === 'give') {
       const pl = g.players[b.playerId];
       if (!pl || !ABILITIES[b.ability]) throw new HttpError(404, 'Spieler oder Fähigkeit nicht gefunden');
@@ -1205,6 +1368,25 @@ async function handleAdmin(req, res, url) {
     } else if (act === 'clearflags') {
       const pl = g.players[b.playerId];
       if (pl) pl.flags = {};
+    } else if (act === 'rejectphoto') {
+      // Foto entfernen; war es ein Quest-Foto, werden Punkte und Belohnung zurückgenommen
+      const i = g.photos.findIndex((x) => x.id === b.photoId);
+      if (i < 0) throw new HttpError(404, 'Foto nicht gefunden');
+      const [ph] = g.photos.splice(i, 1);
+      await fsp.unlink(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`)).catch(() => {});
+      const pl = g.players[ph.pid];
+      if (pl) {
+        const q = pl.quests.find((x) => x.photoId === ph.id && x.status === 'done');
+        if (q) {
+          q.status = 'rejected';
+          award(pl, 'quests', -(q.pointsAwarded || 0), -1);
+          if (q.rewardKey && pl.abilities[q.rewardKey] > 0) { pl.abilities[q.rewardKey]--; if (!pl.abilities[q.rewardKey]) delete pl.abilities[q.rewardKey]; }
+          inbox(pl, `❌ Die Spielleitung hat dein Foto für „${QUESTS[q.key].title}“ abgelehnt. Punkte und Belohnung wurden zurückgenommen.`, 'bad');
+        } else {
+          award(pl, 'photos', -POINTS.photo, -1);
+          inbox(pl, '❌ Die Spielleitung hat eins deiner Fotos abgelehnt.', 'bad');
+        }
+      }
     } else if (act === 'feature') {
       const ph = g.photos.find((x) => x.id === b.photoId);
       if (!ph) throw new HttpError(404, 'Foto nicht gefunden');
@@ -1226,19 +1408,23 @@ async function handleAdmin(req, res, url) {
 }
 
 /** Eine Position übernehmen (mit Anti-Cheat-Prüfung). Gibt false zurück, wenn sie verworfen wurde. */
-function acceptLocation(g, pl, lat, lng, acc, mock) {
+function acceptLocation(g, pl, lat, lng, acc, mock, ts = Date.now(), checkNow = true) {
   const s = g.settings;
-  const reason = s.antiSpoof === 'off' ? null : checkSpoof(pl, pl.lastLoc, lat, lng, acc, mock, s.maxSpeedKmh);
+  const prevLoc = pl.lastLoc;
+  const reason = s.antiSpoof === 'off' ? null : checkSpoof(pl, prevLoc, lat, lng, acc, mock, s.maxSpeedKmh, ts);
   if (reason) {
     pl.flags.spoof = Date.now(); pl.flags.spoofReason = reason; pl.flags.spoofCount = (pl.flags.spoofCount || 0) + 1;
     cheatMsg(g, pl, 'spoof', `Verdacht auf GPS-Fälschung – ${reason}`);
     if (s.antiSpoof === 'block') { save(); throw new HttpError(409, `Position abgelehnt: ${reason}`, { spoof: true }); }
   }
-  const now = Date.now();
-  pl.lastLoc = { lat, lng, acc, ts: now };
-  g.locations.push({ pid: pl.id, lat, lng, acc: Math.round(acc), ts: now });
-  if (g.locations.length > MAX_LOCATIONS) g.locations.splice(0, g.locations.length - MAX_LOCATIONS);
-  if (s.questsEnabled) checkQuests(g, pl, now);
+  pl.lastLoc = { lat, lng, acc, ts };
+  // Distanz-Quests schrittweise mitzählen
+  if (prevLoc && acc < 80 && (prevLoc.acc || 0) < 80) {
+    const d = haversine(prevLoc.lat, prevLoc.lng, lat, lng);
+    for (const q of pl.quests) if (q.status === 'active' && QUESTS[q.key].kind === 'distance' && ts >= q.start) q.dist = (q.dist || 0) + d;
+  }
+  addLocation(g, { pid: pl.id, lat, lng, acc: Math.round(acc), ts });
+  if (checkNow && s.questsEnabled) checkQuests(g, pl, Date.now());
   return true;
 }
 
@@ -1265,6 +1451,8 @@ async function handleGame(req, res, url, code, rest) {
         livePenaltyEnabled: s.livePenaltyEnabled, photoGraceSec: s.photoGraceSec, livePenaltyUntil: s.livePenaltyUntil,
         abilitiesEnabled: s.abilitiesEnabled, questsEnabled: s.questsEnabled, pickupsEnabled: s.pickupsEnabled,
         antiVpn: s.antiVpn, antiSpoof: s.antiSpoof,
+        caughtBecomeHunter: s.caughtBecomeHunter, chatEnabled: s.chatEnabled, voiceEnabled: s.voiceEnabled,
+        spectatorsEnabled: s.spectatorsEnabled, spectatorDelaySec: s.spectatorDelaySec,
       },
     });
   }
@@ -1273,23 +1461,24 @@ async function handleGame(req, res, url, code, rest) {
     const acc = accountFromToken(req.headers['x-account'] || b.accountToken);
     if (!acc) throw new HttpError(401, 'Bitte melde dich zuerst mit deinem Account an.', { needsAccount: true });
     if (!acc.verified) throw new HttpError(403, 'Bitte bestätige zuerst deine E-Mail-Adresse.', { needsVerification: true });
-    if (!['runner', 'hunter'].includes(b.role)) throw new HttpError(400, 'Bitte eine Rolle wählen');
+    if (!['runner', 'hunter', 'spectator'].includes(b.role)) throw new HttpError(400, 'Bitte eine Rolle wählen');
+    if (b.role === 'spectator' && !g.settings.spectatorsEnabled) throw new HttpError(403, 'In diesem Spiel sind keine Zuschauer erlaubt');
     // Schon in diesem Spiel? Dann wieder anmelden (Rolle nur in der Lobby änderbar)
     const existing = Object.values(g.players).find((p) => p.accountId === acc.id);
     if (existing) {
-      if (g.status === 'lobby' && existing.role !== b.role) { existing.role = b.role; existing.abilities = {}; existing.gotStart = false; pushMsg(g, `${existing.name} spielt jetzt als ${b.role === 'runner' ? 'Runner' : 'Hunter'}.`); }
+      if (g.status === 'lobby' && existing.role !== b.role) { existing.role = b.role; existing.abilities = {}; existing.gotStart = false; pushMsg(g, `${existing.name} ${roleText(b.role)}.`); }
       save(); notify(g.code);
       return sendJSON(res, 200, { token: existing.token, id: existing.id, name: existing.name, role: existing.role, rejoined: true });
     }
     if (g.status === 'ended') throw new HttpError(409, 'Das Spiel ist schon beendet');
     if (Object.keys(g.players).length >= MAX_PLAYERS) throw new HttpError(409, 'Das Spiel ist voll');
-    await vpnGate(req, g, null);
+    if (b.role !== 'spectator') await vpnGate(req, g, null);
     const name = acc.username;
     if (Object.values(g.players).some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Dieser Name ist schon im Spiel');
     const player = migratePlayer({ id: rid(4), name, role: b.role, token: rid(18), accountId: acc.id, caught: false, joinedAt: Date.now(), lastSeen: Date.now(), lastLoc: null });
     g.players[player.id] = player;
     if (g.status === 'running') { giveStartAbilities(g, player); player.nextQuestAt = Date.now() + 60000; }
-    pushMsg(g, `${name} ist als ${b.role === 'runner' ? 'Runner' : 'Hunter'} beigetreten.`);
+    pushMsg(g, `${name} ${b.role === 'spectator' ? 'schaut zu' : `ist als ${b.role === 'runner' ? 'Runner' : 'Hunter'} beigetreten`}.`);
     save(); notify(g.code);
     return sendJSON(res, 201, { token: player.token, id: player.id, name, role: player.role });
   }
@@ -1308,6 +1497,9 @@ async function handleGame(req, res, url, code, rest) {
   if (rest === 'events' && m === 'GET') return openSSE(req, res, g);
 
   const pl = auth.player;
+  if (pl && !isPlaying(pl) && ['location', 'locations', 'photo', 'ability', 'pickup', 'caught'].includes(rest) && m === 'POST') {
+    throw new HttpError(403, 'Zuschauer können nur zuschauen');
+  }
   if (rest === 'location' && m === 'POST') {
     if (!pl) throw new HttpError(403, 'Nur für Spieler');
     if (g.status !== 'running') throw new HttpError(409, 'Das Spiel läuft gerade nicht');
@@ -1323,6 +1515,68 @@ async function handleGame(req, res, url, code, rest) {
     acceptLocation(g, pl, lat, lng, acc, mock);
     save(); notify(g.code);
     return sendJSON(res, 200, { ok: true, nextInMs: interval * 1000, live: !!live });
+  }
+
+  // Offline gesammelte Positionen nachreichen (z. B. nach einem Funkloch). ts in Server-Zeit.
+  if (rest === 'locations' && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    if (g.status !== 'running') throw new HttpError(409, 'Das Spiel läuft gerade nicht');
+    if (pl.caught) throw new HttpError(409, 'Du bist gefangen');
+    const b = await readJSON(req);
+    if (!Array.isArray(b.points)) throw new HttpError(400, 'points fehlt');
+    await vpnGate(req, g, pl);
+    const now = Date.now();
+    const pts = b.points.slice(0, 500).map((x) => ({ ...parseLoc(x), ts: Math.round(Number(x.ts)) }))
+      .filter((x) => Number.isFinite(x.ts) && x.ts > now - 30 * 60000 && x.ts <= now + 10000 && x.ts > (g.startedAt || 0))
+      .sort((a, c) => a.ts - c.ts);
+    let accepted = 0, rejected = 0;
+    for (const x of pts) {
+      if (pl.lastLoc && x.ts <= pl.lastLoc.ts) continue;
+      try { acceptLocation(g, pl, x.lat, x.lng, x.acc, x.mock, Math.min(x.ts, now), false); accepted++; }
+      catch (e) { if (e instanceof HttpError) rejected++; else throw e; }
+    }
+    if (g.settings.questsEnabled) checkQuests(g, pl, now);
+    save(); notify(g.code);
+    return sendJSON(res, 200, { ok: true, accepted, rejected });
+  }
+
+  // Team-Chat (Text)
+  if (rest === 'chat' && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    if (!g.settings.chatEnabled) throw new HttpError(409, 'Der Chat ist in diesem Spiel aus');
+    const b = await readJSON(req);
+    const text = cleanText(b.text, 300);
+    if (!text) throw new HttpError(400, 'Nachricht fehlt');
+    chatGate(pl);
+    pushChat(g, pl, { text });
+    save(); notify(g.code);
+    return sendJSON(res, 201, { ok: true });
+  }
+  // Team-Chat (Sprachnachricht, wie ein Walkie-Talkie): Audio als Body, ?dur=Sekunden
+  if (rest === 'chat/voice' && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    if (!g.settings.chatEnabled || !g.settings.voiceEnabled) throw new HttpError(409, 'Sprachnachrichten sind in diesem Spiel aus');
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim();
+    const ext = { 'audio/mp4': 'm4a', 'audio/aac': 'm4a', 'audio/m4a': 'm4a', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3' }[type];
+    if (!ext) throw new HttpError(415, 'Unbekanntes Audioformat');
+    chatGate(pl);
+    const buf = await readBody(req, MAX_VOICE_BYTES);
+    if (buf.length < 200) throw new HttpError(400, 'Aufnahme zu kurz');
+    const id = rid(6);
+    await fsp.writeFile(path.join(VOICE_DIR, `${g.code}_${id}.${ext}`), buf);
+    const dur = Math.max(1, Math.min(60, Math.round(Number(url.searchParams.get('dur')) || 0)));
+    pushChat(g, pl, { text: '', voice: { id, ext, type, dur } });
+    save(); notify(g.code);
+    return sendJSON(res, 201, { ok: true, id });
+  }
+  const vm = rest.match(/^chat\/voice\/([a-f0-9]{12})$/);
+  if (vm && m === 'GET') {
+    const c = g.chat.find((x) => x.voice && x.voice.id === vm[1]);
+    if (!c || !(auth.admin || (pl && c.team === pl.role))) throw new HttpError(404, 'Nicht gefunden');
+    const data = await fsp.readFile(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`)).catch(() => null);
+    if (!data) throw new HttpError(404, 'Nicht gefunden');
+    res.writeHead(200, { 'Content-Type': c.voice.type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=86400' });
+    return res.end(data);
   }
 
   if (rest === 'photo' && m === 'POST') {
@@ -1342,6 +1596,7 @@ async function handleGame(req, res, url, code, rest) {
     await fsp.writeFile(path.join(PHOTO_DIR, `${g.code}_${id}.jpg`), buf);
     const now = Date.now();
     g.photos.push({ id, pid: pl.id, ts: now, quest: quest ? quest.key : null });
+    if (quest) quest.photoId = id;
     award(pl, 'photos', POINTS.photo);
     if (pl.role === 'runner') photoCredited(g, pl, now);
     if (quest) completeQuest(g, pl, quest);
@@ -1365,7 +1620,7 @@ async function handleGame(req, res, url, code, rest) {
     if (g.status !== 'running') throw new HttpError(409, 'Das Spiel läuft gerade nicht');
     const b = await readJSON(req);
     const target = g.players[b.playerId];
-    if (!target || target.role !== 'runner') throw new HttpError(404, 'Runner nicht gefunden');
+    if (!target || !(target.role === 'runner' || target.converted)) throw new HttpError(404, 'Runner nicht gefunden');
     const value = b.caught !== false;
     const isHunterOrAdmin = auth.admin || pl.role === 'hunter';
     const isSelf = pl && pl.id === target.id;
@@ -1464,7 +1719,7 @@ async function serveStatic(req, res, url) {
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self)');
+  res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self), microphone=(self)');
   res.setHeader('Content-Security-Policy', CSP);
   try {
     const url = new URL(req.url, 'http://localhost');

@@ -7,6 +7,7 @@
       "name": "Freeze",
       "desc": "Alle Hunter sind eingefroren: Sie sehen keine Runner mehr und können niemanden fangen.",
       "durationSec": 90,
+      "cooldownSec": 300,
       "target": null
     },
     "cloak": {
@@ -16,6 +17,7 @@
       "name": "Tarnkappe",
       "desc": "Du verschwindest von der Karte der Hunter.",
       "durationSec": 180,
+      "cooldownSec": 240,
       "target": null
     },
     "decoy": {
@@ -25,6 +27,7 @@
       "name": "Köder",
       "desc": "Hunter sehen dich an einer falschen Position, 300–600 m entfernt.",
       "durationSec": 300,
+      "cooldownSec": 240,
       "target": null
     },
     "fog": {
@@ -34,6 +37,7 @@
       "name": "Nebelwand",
       "desc": "Deine Position wird für Hunter um bis zu 400 m zusätzlich verwischt.",
       "durationSec": 300,
+      "cooldownSec": 180,
       "target": null
     },
     "photoJoker": {
@@ -43,6 +47,7 @@
       "name": "Fotojoker",
       "desc": "Die aktuelle Foto-Runde gilt als erledigt. Beendet auch einen Live-Standort wegen fehlendem Foto.",
       "durationSec": 0,
+      "cooldownSec": 0,
       "target": null
     },
     "rescue": {
@@ -52,6 +57,7 @@
       "name": "Befreiung",
       "desc": "Befreit einen gefangenen Runner, er ist sofort wieder im Spiel.",
       "durationSec": 0,
+      "cooldownSec": 300,
       "target": "caughtRunner"
     },
     "radar": {
@@ -61,6 +67,7 @@
       "name": "Radar",
       "desc": "Alle Hunter sehen den Live-Standort aller Runner, exakt und alle paar Sekunden aktualisiert.",
       "durationSec": 180,
+      "cooldownSec": 300,
       "target": null
     },
     "ping": {
@@ -70,6 +77,7 @@
       "name": "Peilung",
       "desc": "Der nächste Runner muss sofort seinen exakten Standort senden und bleibt eine Minute live.",
       "durationSec": 60,
+      "cooldownSec": 120,
       "target": null
     },
     "photoOrder": {
@@ -79,6 +87,7 @@
       "name": "Fotobefehl",
       "desc": "Alle Runner müssen innerhalb von 2 Minuten ein Foto hochladen, sonst wird ihr Standort live geteilt.",
       "durationSec": 120,
+      "cooldownSec": 300,
       "target": null
     },
     "tracker": {
@@ -88,6 +97,7 @@
       "name": "Spurenleser",
       "desc": "Hunter sehen die komplette, exakte Route aller Runner.",
       "durationSec": 300,
+      "cooldownSec": 240,
       "target": null
     },
     "thaw": {
@@ -97,6 +107,7 @@
       "name": "Eisbrecher",
       "desc": "Beendet einen Freeze sofort für alle Hunter.",
       "durationSec": 0,
+      "cooldownSec": 0,
       "target": null
     },
     "shield": {
@@ -106,6 +117,7 @@
       "name": "Schild",
       "desc": "Du bist immun gegen Fähigkeiten des anderen Teams (Freeze, Radar, Peilung, Fotobefehl).",
       "durationSec": 300,
+      "cooldownSec": 240,
       "target": null
     }
   },
@@ -310,5 +322,115 @@
       "minutes": 8,
       "points": 40
     }
-  }
+  },
+  "badges": [
+    {
+      "key": "firstGame",
+      "icon": "🎮",
+      "name": "Neuling",
+      "desc": "Erstes Spiel gespielt"
+    },
+    {
+      "key": "veteran",
+      "icon": "🎖️",
+      "name": "Veteran",
+      "desc": "10 Spiele gespielt"
+    },
+    {
+      "key": "firstCatch",
+      "icon": "🪤",
+      "name": "Erster Fang",
+      "desc": "Einen Runner gefangen"
+    },
+    {
+      "key": "bountyHunter",
+      "icon": "🤠",
+      "name": "Kopfgeldjäger",
+      "desc": "10 Runner gefangen"
+    },
+    {
+      "key": "winner",
+      "icon": "🏆",
+      "name": "Sieger",
+      "desc": "Ein Spiel gewonnen"
+    },
+    {
+      "key": "champion",
+      "icon": "👑",
+      "name": "Champion",
+      "desc": "5 Spiele gewonnen"
+    },
+    {
+      "key": "survivor",
+      "icon": "⏱️",
+      "name": "Überlebenskünstler",
+      "desc": "Insgesamt 60 Minuten als Runner überlebt"
+    },
+    {
+      "key": "marathon",
+      "icon": "🏃",
+      "name": "Marathon",
+      "desc": "Insgesamt 5 Stunden als Runner überlebt"
+    },
+    {
+      "key": "ghost",
+      "icon": "👻",
+      "name": "Phantom",
+      "desc": "Als Runner bis zum Ende durchgekommen, ohne je live geortet zu werden"
+    },
+    {
+      "key": "questStarter",
+      "icon": "📜",
+      "name": "Abenteurer",
+      "desc": "5 Quests geschafft"
+    },
+    {
+      "key": "questMaster",
+      "icon": "🧙",
+      "name": "Questmeister",
+      "desc": "25 Quests geschafft"
+    },
+    {
+      "key": "collector",
+      "icon": "🧺",
+      "name": "Sammler",
+      "desc": "10 Fähigkeiten eingesammelt"
+    },
+    {
+      "key": "iceAge",
+      "icon": "🧊",
+      "name": "Eiszeit",
+      "desc": "5-mal Freeze eingesetzt"
+    },
+    {
+      "key": "radarOperator",
+      "icon": "📡",
+      "name": "Funker",
+      "desc": "5-mal Radar eingesetzt"
+    },
+    {
+      "key": "turncoat",
+      "icon": "🔄",
+      "name": "Seitenwechsel",
+      "desc": "Nach dem eigenen Fang als Hunter selbst einen Runner gefangen"
+    },
+    {
+      "key": "photographer",
+      "icon": "📸",
+      "name": "Fotograf",
+      "desc": "Ein Foto in der Galerie der besten Fotos"
+    },
+    {
+      "key": "artist",
+      "icon": "🖼️",
+      "name": "Künstler",
+      "desc": "5 Fotos in der Galerie"
+    },
+    {
+      "key": "chatter",
+      "icon": "💬",
+      "name": "Funkverkehr",
+      "desc": "50 Nachrichten im Team-Chat"
+    }
+  ]
 }

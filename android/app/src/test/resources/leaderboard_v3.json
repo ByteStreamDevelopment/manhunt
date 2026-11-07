@@ -1,0 +1,74 @@
+{
+  "sort": "points",
+  "rows": [
+    {
+      "username": "Rita",
+      "isAdmin": false,
+      "points": 0,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "caught": 1,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 0,
+      "abilities": 0,
+      "featured": 0,
+      "surviveMin": 0,
+      "cleanEscapes": 0,
+      "freezes": 0,
+      "radars": 0,
+      "revenge": 0,
+      "chats": 0,
+      "badges": [
+        "firstGame"
+      ]
+    },
+    {
+      "username": "Rolf",
+      "isAdmin": false,
+      "points": 0,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "caught": 0,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 0,
+      "abilities": 1,
+      "featured": 0,
+      "surviveMin": 0,
+      "cleanEscapes": 0,
+      "freezes": 1,
+      "radars": 0,
+      "revenge": 0,
+      "chats": 2,
+      "badges": [
+        "firstGame"
+      ]
+    },
+    {
+      "username": "Hans",
+      "isAdmin": false,
+      "points": 0,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "caught": 0,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 0,
+      "abilities": 0,
+      "featured": 0,
+      "surviveMin": 0,
+      "cleanEscapes": 0,
+      "freezes": 0,
+      "radars": 0,
+      "revenge": 0,
+      "chats": 0,
+      "badges": [
+        "firstGame"
+      ]
+    }
+  ]
+}

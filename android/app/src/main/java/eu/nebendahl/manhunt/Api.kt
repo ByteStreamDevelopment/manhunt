@@ -150,6 +150,39 @@ object Api {
 
     fun photoBytes(code: String, token: String, id: String): ByteArray = call(get("/api/g/$code/photo/$id", token))
 
+    /** Offline gesammelte Positionen nachreichen (ts in Server-Zeit). Gibt die Zahl der angenommenen zurück. */
+    fun postLocations(code: String, token: String, points: List<Pair<Loc, Boolean>>): Int {
+        val arr = org.json.JSONArray()
+        for ((l, mock) in points) {
+            val o = JSONObject().put("lat", l.lat).put("lng", l.lng).put("acc", l.acc).put("ts", l.ts)
+            if (mock) o.put("mock", true)
+            arr.put(o)
+        }
+        return json(post("/api/g/$code/locations", token, JSONObject().put("points", arr))).optInt("accepted")
+    }
+
+    /* ---------------- Team-Chat ---------------- */
+
+    fun sendChat(code: String, token: String, text: String) {
+        json(post("/api/g/$code/chat", token, JSONObject().put("text", text)))
+    }
+
+    fun sendVoice(code: String, token: String, audio: ByteArray, durSec: Int) {
+        val req = Request.Builder().url(url("/api/g/$code/chat/voice?dur=$durSec")).header("x-token", token)
+            .post(audio.toRequestBody("audio/mp4".toMediaType())).build()
+        call(req)
+    }
+
+    fun voiceBytes(code: String, token: String, id: String): ByteArray = call(get("/api/g/$code/chat/voice/$id", token))
+
+    /* ---------------- Spielleitung (mit dem Token eines Admin-Accounts) ---------------- */
+
+    fun adminGames(adminToken: String): List<AdminGame> = parseAdminGames(json(get("/api/admin/games", adminToken)))
+
+    fun adminAction(adminToken: String, code: String, action: String, body: JSONObject = JSONObject()) {
+        json(post("/api/admin/games/$code/$action", adminToken, body))
+    }
+
     fun eventsRequest(code: String, token: String): Request =
         Request.Builder().url(url("/api/g/$code/events")).header("x-token", token).header("Accept", "text/event-stream").build()
 }

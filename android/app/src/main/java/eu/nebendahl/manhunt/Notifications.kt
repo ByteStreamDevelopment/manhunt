@@ -12,6 +12,8 @@ object Notif {
     const val CH_TRACK = "tracking"
     const val CH_ALARM = "alarm"
     const val CH_EVENTS = "events"
+    const val CH_CHAT = "chat"
+    const val ID_CHAT = 3
     const val ID_TRACK = 1
     const val ID_ALARM = 2
     private const val ID_EVENT_BASE = 100
@@ -24,6 +26,11 @@ object Notif {
             NotificationChannel(CH_ALARM, "Foto-Erinnerung", NotificationManager.IMPORTANCE_HIGH).apply {
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 600)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_CHAT, "Team-Chat", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Nachrichten und Sprachnachrichten aus deinem Team"
             },
         )
         nm.createNotificationChannel(
@@ -75,6 +82,34 @@ object Notif {
 
     fun cancelPhotoAlarm(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java).cancel(ID_ALARM)
+    }
+
+    private val chatLines = ArrayDeque<String>()
+
+    /** Team-Chat: eine gesammelte Benachrichtigung mit den letzten Nachrichten. */
+    fun chat(ctx: Context, from: String, text: String) {
+        if (!canPost(ctx)) return
+        chatLines.addLast("$from: $text")
+        while (chatLines.size > 6) chatLines.removeFirst()
+        val style = NotificationCompat.InboxStyle()
+        chatLines.forEach { style.addLine(it) }
+        val n = NotificationCompat.Builder(ctx, CH_CHAT)
+            .setSmallIcon(R.drawable.ic_stat_manhunt)
+            .setContentTitle("💬 Team-Chat")
+            .setContentText("$from: $text")
+            .setStyle(style)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setContentIntent(openApp(ctx))
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(ID_CHAT, n)
+    }
+
+    fun clearChat(ctx: Context) {
+        chatLines.clear()
+        ctx.getSystemService(NotificationManager::class.java).cancel(ID_CHAT)
     }
 
     fun event(ctx: Context, title: String, text: String) {

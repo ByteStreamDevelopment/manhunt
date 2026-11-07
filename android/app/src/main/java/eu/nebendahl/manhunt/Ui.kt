@@ -132,9 +132,10 @@ fun App(inviteCode: String?) {
         when {
             screen == "leaderboard" -> LeaderboardScreen { screen = "main" }
             screen == "gallery" -> GalleryScreen { screen = "main" }
+            screen == "admin" && a != null -> AdminScreen(a) { screen = "main" }
             s != null -> GameScreen(openLeaderboard = { screen = "leaderboard" })
             a == null -> AuthScreen()
-            else -> HomeScreen(a, inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" })
+            else -> HomeScreen(a, inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" }, openAdmin = { screen = "admin" })
         }
     }
 }
@@ -248,6 +249,11 @@ fun GameScreen(openLeaderboard: () -> Unit) {
     LaunchedEffect(Unit) { GameRepository.toasts.collect { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }
     val shooter = rememberPhotoShooter()
     val activeQuests = g?.self?.quests?.count { it.status == "active" } ?: 0
+    // Ungelesene Chat-Nachrichten (von anderen) seit dem letzten Öffnen des Chat-Tabs
+    var seenChatCount by rememberSaveable { mutableIntStateOf(-1) }
+    val chatCount = g?.chat?.count { it.pid != g.self.id } ?: 0
+    LaunchedEffect(tab, chatCount, g != null) { if (g != null && (tab == 4 || seenChatCount < 0)) seenChatCount = chatCount }
+    val newChat = (chatCount - seenChatCount).coerceAtLeast(0)
 
   Box(Modifier.fillMaxSize()) {
 
@@ -273,12 +279,13 @@ fun GameScreen(openLeaderboard: () -> Unit) {
         bottomBar = {
             NavigationBar {
                 val newPhotos = (photoCount - seenPhotoCount).coerceAtLeast(0)
-                listOf("🗺️" to "Karte", "⚡" to "Aktionen", "👥" to "Spieler", "📷" to "Fotos", "💬" to "Meldungen").forEachIndexed { i, (icon, label) ->
+                listOf("🗺️" to "Karte", "⚡" to "Aktionen", "👥" to "Spieler", "📷" to "Fotos", "💬" to "Chat").forEachIndexed { i, (icon, label) ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i },
                         icon = {
                             val badge = when {
+                                i == 4 && tab != 4 && newChat > 0 -> "$newChat"
                                 i == 3 && tab != 3 && newPhotos > 0 -> "$newPhotos"
                                 i == 1 && tab != 1 && activeQuests > 0 -> "$activeQuests"
                                 else -> null
@@ -301,7 +308,7 @@ fun GameScreen(openLeaderboard: () -> Unit) {
                 }
             } else {
                 err?.let { Banner("Verbindungsproblem: $it", BannerKind.Error) }
-                if (g.game.status != "ended") {
+                if (g.game.status != "ended" && g.isPlayer()) {
                     if (!hasLocPerm) {
                         Banner("Standortfreigabe fehlt – ohne sie kannst du nicht mitspielen.", BannerKind.Error, "Erlauben") {
                             if (askedOnce) openAppSettings(ctx) else permLauncher.launch(gamePermissions)
@@ -327,7 +334,7 @@ fun GameScreen(openLeaderboard: () -> Unit) {
                         1 -> ActionsTab(g, serverNow, shooter, showOnMap = { la, ln -> focus = MapFocus(point = la to ln); tab = 0 }, openLeaderboard = openLeaderboard)
                         2 -> PlayersTab(g, serverNow) { id -> focus = MapFocus(playerId = id); tab = 0 }
                         3 -> PhotosTab(g, serverNow, shooter)
-                        else -> MessagesTab(g)
+                        else -> ChatTab(g)
                     }
                 }
             }
@@ -360,6 +367,14 @@ private fun leave(ctx: Context) {
 private fun StatusBanners(st: GameState, serverNow: Long, openPhotos: () -> Unit) {
     val g = st.game
     val s = st.settings
+    val queued by GameRepository.queued.collectAsState()
+    if (queued > 0) Banner("📶 Keine Verbindung – $queued Positionen werden nachgereicht, sobald du wieder Netz hast.", BannerKind.Warn)
+    if (st.self.role == "spectator") {
+        Banner("👀 Du schaust zu. Positionen siehst du ${st.self.spectatorDelaySec} s verzögert.")
+        if (g.status == "running") { Banner("Läuft seit ${fmtDur(serverNow - (g.startedAt ?: serverNow))}") }
+        return
+    }
+    if (st.self.converted && g.status == "running") Banner("🔄 Du wurdest gefangen und jagst jetzt als Hunter mit!", BannerKind.Warn)
     val fix by GameRepository.myFix.collectAsState()
     val lastSent by GameRepository.lastSentAt.collectAsState()
     val localLastPhoto by GameRepository.localLastPhoto.collectAsState()
@@ -620,33 +635,6 @@ private fun PhotoThumb(ph: PhotoRef, name: String, onClick: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White,
             )
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* Meldungen                                                           */
-/* ------------------------------------------------------------------ */
-
-@Composable
-private fun MessagesTab(st: GameState) {
-    if (st.messages.isEmpty()) {
-        Text("Noch nichts passiert.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
-    }
-    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(st.messages.reversed(), key = { it.id }) { m ->
-            val admin = m.kind == "admin"
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(10.dp)) {
-                    Text(
-                        (if (admin) "📣 Spielleitung · " else "") + clock(m.ts) + " Uhr",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (admin) C_WARN else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(m.text, fontWeight = if (admin) FontWeight.Bold else FontWeight.Normal)
-                }
-            }
         }
     }
 }

@@ -39,6 +39,10 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.1: Team-Chat mit Sprachnachrichten (🎙️ gedrückt halten), Zuschauer-Modus, Wiederholung nach Spielende,
+  Abzeichen in der Bestenliste (Eintrag antippen), Abklingzeiten, Seitenwechsel (gefangen = jetzt Hunter),
+  Spielleitung in der App für Admin-Accounts, Positionen im Funkloch werden nachgereicht,
+  GPS fragt seltener ab, wenn man stillsteht (spart Akku)
 - Account mit E-Mail-Bestätigung (Registrieren, Code eingeben, Passwort vergessen); Name im Spiel = Benutzername
 - Bestenliste und Galerie der besten Fotos (mit Fotograf), direkt in der App
 - Tab „Aktionen“: Fähigkeiten einsetzen (Freeze, Tarnkappe, Radar …), Quests mit Countdown, Ziel auf der Karte

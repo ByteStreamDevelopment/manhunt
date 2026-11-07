@@ -138,6 +138,10 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
         }
     }
 
+    if (!st.isPlayer()) {
+        Text("Als Zuschauer hast du keine Fähigkeiten und Quests – schau auf der Karte zu!", Modifier.padding(16.dp))
+        return
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Aktive Effekte
         if (st.effects.isNotEmpty()) {
@@ -175,9 +179,18 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                         Column(Modifier.weight(1f)) {
                             Text("${a.name}  ×${ab.count}", fontWeight = FontWeight.Bold)
                             Text(a.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (a.durationSec > 0) Text("Dauer: ${fmtDur(a.durationSec * 1000L)}", style = MaterialTheme.typography.labelSmall)
+                            if (a.durationSec > 0 || a.cooldownSec > 0) Text(
+                                listOfNotNull(
+                                    a.durationSec.takeIf { it > 0 }?.let { "Dauer: ${fmtDur(it * 1000L)}" },
+                                    a.cooldownSec.takeIf { it > 0 }?.let { "Abklingzeit: ${fmtDur(it * 1000L)}" },
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                         }
-                        Button(onClick = { confirm = a }, enabled = running && !st.self.caught && !busy) { Text("Einsetzen") }
+                        val cd = st.self.cooldowns.firstOrNull { it.key == ab.key }?.until?.takeIf { it > serverNow }
+                        Button(onClick = { confirm = a }, enabled = running && !st.self.caught && !busy && cd == null) {
+                            Text(if (cd != null) "⏳ " + fmtDur(cd - serverNow) else "Einsetzen")
+                        }
                     }
                 }
             }

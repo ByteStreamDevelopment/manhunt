@@ -52,14 +52,14 @@ async function detectVpn(req, ip) {
  * Prüft eine neue Position gegen die vorherige. Gibt null zurück (unauffällig) oder einen Grund.
  * prev: { lat, lng, acc, ts }, pl: Spieler (für Zähler identischer Positionen)
  */
-function checkSpoof(pl, prev, lat, lng, acc, mock, maxSpeedKmh) {
+function checkSpoof(pl, prev, lat, lng, acc, mock, maxSpeedKmh, ts = Date.now()) {
   if (mock) return 'Fake-GPS-App erkannt (Mock-Standort)';
   if (acc === 0) return 'Genauigkeit 0 m (typisch für gefälschte Positionen)';
   if (prev) {
     if (prev.lat === lat && prev.lng === lng) pl.sameCount = (pl.sameCount || 0) + 1;
     else pl.sameCount = 0;
     if (pl.sameCount >= 8) return 'Position mehrfach exakt identisch';
-    const dt = (Date.now() - prev.ts) / 1000;
+    const dt = (ts - prev.ts) / 1000;
     if (dt > 0) {
       const d = haversine(prev.lat, prev.lng, lat, lng);
       // Ungenauigkeit beider Positionen großzügig abziehen

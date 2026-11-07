@@ -229,3 +229,16 @@ table.board th button { all: unset; cursor: pointer; text-decoration: underline;
 #freeze { position: fixed; inset: 0; z-index: 3000; background: rgba(120,180,230,.92); color: #06243a; display: grid; place-items: center; text-align: center; padding: 2rem; }
 #freeze h1 { font-size: clamp(2rem, 10vw, 4rem); }
 .pickup-pin { font-size: 26px; line-height: 1; filter: drop-shadow(2px 2px 0 #14201a); }
+
+.badges { font-size: 1rem; letter-spacing: .1em; }
+/* Chat */
+.chat { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+.chat li { background: #fff; border: 2px solid var(--ink); padding: .4rem .6rem; max-width: 85%; }
+.chat li.mine { margin-left: auto; background: var(--runner-soft); }
+.chat .who { font-size: .78rem; font-weight: 800; color: var(--muted); }
+.chat audio { width: 100%; max-width: 260px; height: 36px; }
+.chatbar { display: flex; gap: .5rem; margin-top: .6rem; }
+.chatbar input { flex: 1; }
+.btn.rec { background: var(--hunter); }
+.replay { display: grid; gap: .4rem; }
+.replay input[type=range] { width: 100%; accent-color: var(--ink); }

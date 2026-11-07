@@ -70,6 +70,7 @@ class TrackingService : Service() {
     private var seenMsgs: MutableSet<String>? = null
     private var seenPhotos: MutableSet<String>? = null
     private var seenInbox: MutableSet<String>? = null
+    private var seenChat: MutableSet<String>? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -93,6 +94,8 @@ class TrackingService : Service() {
 
         scope.launch { GameRepository.session.collect { if (it == null) stopSelf() } }
         scope.launch { GameRepository.state.collect { handleState(it) } }
+        // Bewegung beginnt/endet: GPS-Takt anpassen
+        scope.launch { GameRepository.stationary.collect { handleState(GameRepository.state.value) } }
         scope.launch {
             while (isActive) {
                 delay(15_000)
@@ -129,6 +132,7 @@ class TrackingService : Service() {
             }
             st.game.status == "lobby" -> { stopLocation(); setText("Warte auf den Spielstart") }
             st.self.caught -> { stopLocation(); Notif.cancelPhotoAlarm(this); setText("Du wurdest gefangen") }
+            !st.isPlayer() -> { stopLocation(); setText("Du schaust zu") }
             else -> {
                 val serverNow = System.currentTimeMillis() + GameRepository.clockOffset
                 setText(
@@ -140,8 +144,13 @@ class TrackingService : Service() {
                     },
                 )
                 // GPS läuft öfter als gesendet wird: So steht beim Senden immer eine frische, genaue Position bereit.
-                val interval = if (st.self.live != null) maxOf(2_000L, st.self.sendIntervalSec * 1000L)
-                else minOf(st.self.sendIntervalSec * 1000L, 10_000L)
+                // Wer stillsteht, braucht das nicht – dann nur im Sende-Takt abfragen (spart viel Akku).
+                val send = st.self.sendIntervalSec * 1000L
+                val interval = when {
+                    st.self.live != null -> maxOf(2_000L, send)
+                    GameRepository.stationary.value -> maxOf(15_000L, minOf(send, 60_000L))
+                    else -> minOf(send, 10_000L)
+                }
                 ensureLocation(interval)
             }
         }
@@ -168,6 +177,12 @@ class TrackingService : Service() {
                     .any { m.text.contains(it) } -> Notif.event(this, st.game.name, m.text)
                 else -> {}
             }
+        }
+        val chat = seenChat
+        if (chat == null) seenChat = st.chat.map { it.id }.toMutableSet()
+        else for (c in st.chat) {
+            if (!chat.add(c.id) || c.pid == st.self.id) continue
+            Notif.chat(this, c.name, if (c.voice != null) "🎙️ Sprachnachricht (${c.voice.dur} s)" else c.text)
         }
         val inbox = seenInbox
         if (inbox == null) seenInbox = st.self.inbox.map { it.id }.toMutableSet()

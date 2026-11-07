@@ -1,0 +1,28 @@
+{
+  "code": "LYF6Z",
+  "name": "Fixture2",
+  "status": "running",
+  "runners": 1,
+  "hunters": 2,
+  "settings": {
+    "locationIntervalSec": 60,
+    "photosEnabled": true,
+    "photoIntervalMin": 15,
+    "headStartMin": 0,
+    "fuzzMeters": 0,
+    "zoneEnabled": false,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 60,
+    "livePenaltyUntil": "nextRound",
+    "abilitiesEnabled": true,
+    "questsEnabled": false,
+    "pickupsEnabled": false,
+    "antiVpn": "warn",
+    "antiSpoof": "warn",
+    "caughtBecomeHunter": true,
+    "chatEnabled": true,
+    "voiceEnabled": true,
+    "spectatorsEnabled": true,
+    "spectatorDelaySec": 90
+  }
+}
