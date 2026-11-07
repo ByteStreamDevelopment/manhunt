@@ -6,8 +6,9 @@
       "icon": "🧊",
       "name": "Freeze",
       "desc": "Alle Hunter sind eingefroren: Sie sehen keine Runner mehr und können niemanden fangen.",
-      "durationSec": 90,
-      "cooldownSec": 300,
+      "durationSec": 60,
+      "cooldownSec": 900,
+      "rarity": "epic",
       "target": null
     },
     "cloak": {
@@ -16,8 +17,9 @@
       "icon": "👻",
       "name": "Tarnkappe",
       "desc": "Du verschwindest von der Karte der Hunter.",
-      "durationSec": 180,
-      "cooldownSec": 240,
+      "durationSec": 120,
+      "cooldownSec": 600,
+      "rarity": "rare",
       "target": null
     },
     "decoy": {
@@ -26,8 +28,9 @@
       "icon": "🎭",
       "name": "Köder",
       "desc": "Hunter sehen dich an einer falschen Position, 300–600 m entfernt.",
-      "durationSec": 300,
-      "cooldownSec": 240,
+      "durationSec": 180,
+      "cooldownSec": 600,
+      "rarity": "rare",
       "target": null
     },
     "fog": {
@@ -36,8 +39,9 @@
       "icon": "🌫️",
       "name": "Nebelwand",
       "desc": "Deine Position wird für Hunter um bis zu 400 m zusätzlich verwischt.",
-      "durationSec": 300,
-      "cooldownSec": 180,
+      "durationSec": 180,
+      "cooldownSec": 480,
+      "rarity": "common",
       "target": null
     },
     "photoJoker": {
@@ -48,6 +52,7 @@
       "desc": "Die aktuelle Foto-Runde gilt als erledigt. Beendet auch einen Live-Standort wegen fehlendem Foto.",
       "durationSec": 0,
       "cooldownSec": 0,
+      "rarity": "common",
       "target": null
     },
     "rescue": {
@@ -57,7 +62,8 @@
       "name": "Befreiung",
       "desc": "Befreit einen gefangenen Runner, er ist sofort wieder im Spiel.",
       "durationSec": 0,
-      "cooldownSec": 300,
+      "cooldownSec": 900,
+      "rarity": "rare",
       "target": "caughtRunner"
     },
     "radar": {
@@ -66,8 +72,9 @@
       "icon": "📡",
       "name": "Radar",
       "desc": "Alle Hunter sehen den Live-Standort aller Runner, exakt und alle paar Sekunden aktualisiert.",
-      "durationSec": 180,
-      "cooldownSec": 300,
+      "durationSec": 90,
+      "cooldownSec": 900,
+      "rarity": "epic",
       "target": null
     },
     "ping": {
@@ -76,8 +83,9 @@
       "icon": "🎯",
       "name": "Peilung",
       "desc": "Der nächste Runner muss sofort seinen exakten Standort senden und bleibt eine Minute live.",
-      "durationSec": 60,
-      "cooldownSec": 120,
+      "durationSec": 45,
+      "cooldownSec": 300,
+      "rarity": "common",
       "target": null
     },
     "photoOrder": {
@@ -87,7 +95,8 @@
       "name": "Fotobefehl",
       "desc": "Alle Runner müssen innerhalb von 2 Minuten ein Foto hochladen, sonst wird ihr Standort live geteilt.",
       "durationSec": 120,
-      "cooldownSec": 300,
+      "cooldownSec": 600,
+      "rarity": "rare",
       "target": null
     },
     "tracker": {
@@ -96,8 +105,9 @@
       "icon": "🐾",
       "name": "Spurenleser",
       "desc": "Hunter sehen die komplette, exakte Route aller Runner.",
-      "durationSec": 300,
-      "cooldownSec": 240,
+      "durationSec": 180,
+      "cooldownSec": 600,
+      "rarity": "rare",
       "target": null
     },
     "thaw": {
@@ -108,6 +118,7 @@
       "desc": "Beendet einen Freeze sofort für alle Hunter.",
       "durationSec": 0,
       "cooldownSec": 0,
+      "rarity": "rare",
       "target": null
     },
     "shield": {
@@ -116,8 +127,9 @@
       "icon": "🛡️",
       "name": "Schild",
       "desc": "Du bist immun gegen Fähigkeiten des anderen Teams (Freeze, Radar, Peilung, Fotobefehl).",
-      "durationSec": 300,
-      "cooldownSec": 240,
+      "durationSec": 180,
+      "cooldownSec": 600,
+      "rarity": "common",
       "target": null
     }
   },

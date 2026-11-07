@@ -1,0 +1,71 @@
+{
+  "username": "Rita",
+  "isAdmin": false,
+  "createdAt": 1794036019087,
+  "stats": {
+    "points": 5,
+    "games": 1,
+    "wins": 0,
+    "catches": 0,
+    "caught": 0,
+    "quests": 0,
+    "pickups": 0,
+    "photos": 1,
+    "abilities": 0,
+    "featured": 0,
+    "surviveMin": 0,
+    "cleanEscapes": 0,
+    "freezes": 0,
+    "radars": 0,
+    "revenge": 0,
+    "chats": 0
+  },
+  "badges": {
+    "firstGame": 1794036019613
+  },
+  "seasons": [
+    {
+      "season": "2026-11",
+      "points": 5,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "quests": 0,
+      "pickups": 0,
+      "surviveMin": 0,
+      "featured": 0,
+      "rank": 1,
+      "of": 2
+    }
+  ],
+  "avatar": 1794036019577,
+  "showcase": [
+    {
+      "id": "28055b86e3f8",
+      "code": "M3QGQ",
+      "photoId": "9a7ef41b5357",
+      "gameName": "Fotorunde",
+      "ts": 1794036019592,
+      "caption": "Mein Highlight",
+      "quest": null
+    }
+  ],
+  "history": [
+    {
+      "code": "M3QGQ",
+      "name": "Fotorunde",
+      "startedAt": 1794036019590,
+      "endedAt": 1794036019613,
+      "role": "runner",
+      "converted": false,
+      "caught": false,
+      "result": "none",
+      "points": 5,
+      "catches": 0,
+      "available": true
+    }
+  ],
+  "online": true,
+  "self": true,
+  "friendship": null
+}

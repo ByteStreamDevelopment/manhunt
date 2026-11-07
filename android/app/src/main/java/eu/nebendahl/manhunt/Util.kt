@@ -116,3 +116,21 @@ fun downloadFile(ctx: Context, url: String, fileName: String) {
         }
     }
 }
+
+/** Bild aus der Galerie quadratisch (Mitte) auf size×size zuschneiden und als JPEG liefern (Profilbild). */
+fun squareJpeg(ctx: Context, uri: Uri, size: Int): ByteArray {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= size) sample *= 2
+    val src = ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+        ?: throw IllegalStateException("Bild nicht lesbar")
+    val orientation = runCatching {
+        ctx.contentResolver.openInputStream(uri)!!.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val deg = when (orientation) { ExifInterface.ORIENTATION_ROTATE_90 -> 90f; ExifInterface.ORIENTATION_ROTATE_180 -> 180f; ExifInterface.ORIENTATION_ROTATE_270 -> 270f; else -> 0f }
+    val side = minOf(src.width, src.height)
+    val m = Matrix().apply { postScale(size.toFloat() / side, size.toFloat() / side); postRotate(deg) }
+    val out = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side, m, true)
+    return ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+}

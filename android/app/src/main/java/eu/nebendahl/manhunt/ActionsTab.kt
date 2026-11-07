@@ -179,6 +179,10 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                         Text(a.icon, fontSize = 30.sp, modifier = Modifier.padding(end = 10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("${a.name}  ×${ab.count}", fontWeight = FontWeight.Bold)
+                            Text(
+                                a.rarityLabel, style = MaterialTheme.typography.labelSmall,
+                                color = when (a.rarity) { "epic" -> Color(0xFFB57BFF); "rare" -> Color(0xFF6FB7FF); else -> MaterialTheme.colorScheme.onSurfaceVariant },
+                            )
                             Text(a.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (a.durationSec > 0 || a.cooldownSec > 0) Text(
                                 listOfNotNull(

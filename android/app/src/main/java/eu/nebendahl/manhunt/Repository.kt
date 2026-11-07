@@ -344,6 +344,12 @@ object GameRepository {
         }
     }
 
+    /** Emoji-Reaktion auf ein Foto (Issue #6) */
+    suspend fun react(photoId: String, emoji: String) {
+        val s = session.value ?: return
+        withContext(Dispatchers.IO) { Api.react(s.code, s.token, photoId, emoji); runCatching { refresh(s) } }
+    }
+
     suspend fun markCaught(playerId: String, caught: Boolean) {
         val s = session.value ?: return
         withContext(Dispatchers.IO) { Api.setCaught(s.code, s.token, playerId, caught); runCatching { refresh(s) } }

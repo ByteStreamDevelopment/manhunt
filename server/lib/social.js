@@ -43,7 +43,7 @@ function createSocial(ctx) {
   }
   function seasonRows(season) {
     return Object.values(getDb().accounts).filter((a) => a.verified && a.seasons && a.seasons[season])
-      .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptySeason(), ...a.seasons[season], badges: Object.keys(a.badges || {}) }))
+      .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptySeason(), ...a.seasons[season], badges: Object.keys(a.badges || {}), avatar: a.avatar || null }))
       .filter((r) => r.games > 0 || r.points > 0);
   }
   function rankIn(season, username) {
@@ -103,7 +103,9 @@ function createSocial(ctx) {
     }
     return {
       username: a.username, isAdmin: isAdminAccount(a), createdAt: a.createdAt,
-      stats: a.stats, badges: a.badges || {}, history: (a.history || []).slice(0, 30), seasons,
+      stats: a.stats, badges: a.badges || {}, seasons, avatar: a.avatar || null, showcase: a.showcase || [],
+      // available: Spiel liegt noch auf dem Server -> im Spielverlauf öffnen (Karte, Fotos, ZIP)
+      history: (a.history || []).slice(0, 30).map((h) => ({ ...h, available: !!getDb().games[h.code] })),
       online: !!(a.lastSeen && now - a.lastSeen < ONLINE_MS), self: !!(viewer && viewer.id === a.id), friendship,
     };
   }
@@ -113,7 +115,7 @@ function createSocial(ctx) {
   function friendsView(a) {
     const now = Date.now();
     a.invites = (a.invites || []).filter((i) => now - i.ts < INVITE_TTL);
-    const mini = (id) => { const f = byId(id); return f && { username: f.username, online: !!(f.lastSeen && now - f.lastSeen < ONLINE_MS), lastSeen: f.lastSeen || null }; };
+    const mini = (id) => { const f = byId(id); return f && { username: f.username, online: !!(f.lastSeen && now - f.lastSeen < ONLINE_MS), lastSeen: f.lastSeen || null, avatar: f.avatar || null }; };
     return {
       friends: (a.friends || []).map(mini).filter(Boolean).sort((x, y) => Number(y.online) - Number(x.online) || x.username.localeCompare(y.username)),
       incoming: (a.friendIn || []).map(mini).filter(Boolean),

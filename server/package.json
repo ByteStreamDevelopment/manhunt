@@ -1,6 +1,6 @@
 {
   "name": "manhunt",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Echtes Manhunt-Spiel: Runner teilen ihren Standort und Fotos, Hunter jagen sie.",
   "main": "server.js",
   "scripts": {

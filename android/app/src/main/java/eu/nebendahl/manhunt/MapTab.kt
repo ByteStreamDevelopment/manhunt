@@ -62,10 +62,12 @@ private const val C_LIVE = 0xFFFF3B30.toInt()
 data class MapFocus(val playerId: String? = null, val point: Pair<Double, Double>? = null, val nonce: Long = System.nanoTime())
 
 @Composable
-fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () -> Unit) {
+fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, useMyGps: Boolean = true, onFocusHandled: () -> Unit) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
-    val fix by GameRepository.myFix.collectAsState()
+    val liveFix by GameRepository.myFix.collectAsState()
+    // Im Archiv (vergangenes Spiel) nicht die aktuelle GPS-Position einblenden
+    val fix = if (useMyGps) liveFix else null
     val mapView = remember {
         MapView(ctx).apply {
             setTileSource(TileSourceFactory.MAPNIK)
@@ -131,11 +133,6 @@ fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () 
     }
 
     Column(Modifier.fillMaxSize()) {
-        nearestRunnerText(st, fix, serverNow)?.let {
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-                Text(it, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
-            }
-        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
             Column(
@@ -206,7 +203,7 @@ private fun whenLaidOut(m: MapView, block: () -> Unit) {
     else m.addOnFirstLayoutListener { _, _, _, _, _ -> block() }
 }
 
-private fun nearestRunnerText(st: GameState, fix: Loc?, serverNow: Long): String? {
+internal fun nearestRunnerText(st: GameState, fix: Loc?, serverNow: Long): String? {
     if (st.self.role != "hunter" || !st.settings.showDistance || st.game.status != "running") return null
     val cands = st.players.filter { it.role == "runner" && !it.caught && it.loc != null }
     if (cands.isEmpty()) {

@@ -71,7 +71,7 @@ console.log('Spiel');
 r = await api('/api/admin/games', { method: 'POST', token: T, body: { name: 'E2E', settings: {
   photoIntervalMin: 1, photoGraceSec: 0, questIntervalMin: 1, pickupIntervalMin: 1, locationIntervalSec: 10,
   zoneEnabled: true, zoneLat: 52.5, zoneLng: 13.4, zoneRadiusM: 2000, antiSpoof: 'block', antiVpn: 'block', adminGiftsEnabled: true,
-  abilities: { cloak: { start: 1 }, decoy: { enabled: false } }, quests: { r_red: { points: 77 } },
+  abilities: { cloak: { start: 1 }, freeze: { start: 1 }, radar: { start: 1 }, decoy: { enabled: false } }, quests: { r_red: { points: 77 } },
 } } });
 const C = r.code;
 ok(!!C, 'Spiel angelegt');

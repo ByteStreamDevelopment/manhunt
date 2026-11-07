@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients } = require('./lib/catalog');
+const { ABILITIES, QUESTS, POINTS, BADGES, RARITY, ABILITY_REWARD_QUESTS, catalogForClients } = require('./lib/catalog');
 const { Store } = require('./lib/store');
 const { createSocial } = require('./lib/social');
 const { ZipWriter, safeName } = require('./lib/zip');
@@ -21,6 +21,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const PHOTO_DIR = path.join(DATA_DIR, 'photos');
 const GALLERY_DIR = path.join(DATA_DIR, 'gallery');
+const AVATAR_DIR = path.join(DATA_DIR, 'avatars');     // Profilbilder (Issue #7)
+const SHOWCASE_DIR = path.join(DATA_DIR, 'showcase');  // Fotos, die man auf dem eigenen Profil ausstellt (Issue #8)
+const MAX_SHOWCASE = 24;
+/** Erlaubte Reaktionen auf Fotos (Issue #6) */
+const REACTIONS = ['👍', '❤️', '😂', '😮', '🔥', '👏', '🤩', '👎'];
 const DB_FILE = path.join(DATA_DIR, 'db.json'); // altes Format, wird beim Start übernommen
 const SQLITE_FILE = path.join(DATA_DIR, 'manhunt.sqlite');
 const VOICE_DIR = path.join(DATA_DIR, 'voice');
@@ -39,6 +44,8 @@ const ADMIN_USERNAMES = String(process.env.ADMIN_USERNAMES || 'ProfImpossible,Mr
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 fs.mkdirSync(GALLERY_DIR, { recursive: true });
 fs.mkdirSync(VOICE_DIR, { recursive: true });
+fs.mkdirSync(AVATAR_DIR, { recursive: true });
+fs.mkdirSync(SHOWCASE_DIR, { recursive: true });
 
 let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 if (!ADMIN_PASSWORD) {
@@ -56,7 +63,7 @@ function defaultAbilities() {
 }
 function defaultQuests() {
   const o = {};
-  for (const [k, q] of Object.entries(QUESTS)) o[k] = { enabled: true, minutes: q.minutes, points: q.points, reward: 'random' };
+  for (const [k, q] of Object.entries(QUESTS)) o[k] = { enabled: true, minutes: q.minutes, points: q.points, reward: ABILITY_REWARD_QUESTS.includes(k) ? 'random' : 'none' };
   return o;
 }
 const DEFAULTS = {
@@ -93,15 +100,15 @@ const DEFAULTS = {
   questIntervalMin: 8,           // alle X Minuten bekommt jeder eine neue Quest
   questMaxActive: 1,             // so viele Quests gleichzeitig
   pickupsEnabled: true,          // Fähigkeiten zum Einsammeln auf der Karte
-  pickupIntervalMin: 4,          // alle X Minuten taucht eine neue auf
-  pickupMax: 6,                  // höchstens so viele gleichzeitig
+  pickupIntervalMin: 12,         // alle X Minuten taucht eine neue auf
+  pickupMax: 3,                  // höchstens so viele gleichzeitig
   pickupSpacingM: 1000,          // höchstens eine pro Umkreis (Meter, mindestens 1000)
   pickupCollectM: 40,            // so nah muss man ran
   pickupLifetimeMin: 30,         // so lange bleibt eine liegen
   pickupSearchM: 3000,           // Suchradius für große Orte um die Spielmitte
   pickupRandomFallback: true,    // ohne große Orte zufällige Punkte verwenden
   supplyDropsEnabled: false,     // Versorgungsabwürfe (angekündigt, mit mehreren Fähigkeiten)
-  supplyDropIntervalMin: 15,     // alle X Minuten ein Abwurf
+  supplyDropIntervalMin: 20,     // alle X Minuten ein Abwurf
   supplyDropWarnMin: 5,          // so lange vorher wird er angekündigt
   supplyDropAbilities: 2,        // so viele Fähigkeiten enthält er
   antiVpn: 'warn',               // off | warn | block
@@ -398,7 +405,7 @@ function accountFromToken(t) {
   return safeEq(sig || '', hmac(`acc|${id}|${exp}|${a.tokenVersion || 0}`)) ? a : null;
 }
 function publicAccount(a) {
-  return { id: a.id, username: a.username, email: a.email, verified: !!a.verified, isAdmin: isAdminAccount(a), stats: { ...emptyStats(), ...a.stats }, badges: Object.keys(a.badges || {}), createdAt: a.createdAt };
+  return { id: a.id, username: a.username, email: a.email, verified: !!a.verified, isAdmin: isAdminAccount(a), stats: { ...emptyStats(), ...a.stats }, badges: Object.keys(a.badges || {}), avatar: a.avatar || null, createdAt: a.createdAt };
 }
 async function sendCode(a, purpose) {
   const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
@@ -577,7 +584,11 @@ function grantRandomAbility(g, pl, why) {
   if (!g.settings.abilitiesEnabled) return null;
   const list = obtainableFor(g, pl.role);
   if (!list.length) return null;
-  const k = pick(list);
+  // Nach Seltenheit gewichtet ziehen: epische Fähigkeiten (Freeze, Radar) kommen selten
+  const weights = list.map((x) => RARITY[ABILITIES[x].rarity] || RARITY.common);
+  let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+  let k = list[list.length - 1];
+  for (let i = 0; i < list.length; i++) { r -= weights[i]; if (r < 0) { k = list[i]; break; } }
   pl.abilities[k] = (pl.abilities[k] || 0) + 1;
   inbox(pl, `${ABILITIES[k].icon} Neue Fähigkeit: ${ABILITIES[k].name}${why ? ` (${why})` : ''}`, 'reward');
   return k;
@@ -1281,6 +1292,7 @@ function buildState(g, auth) {
       live: vis && live ? live.reason : null,
       frozen: t.role === 'hunter' && g.status === 'running' && frozenUntil(g, t.id, now) > now,
       converted: !!t.converted,
+      avatar: (t.accountId && db.accounts[t.accountId]?.avatar) || null,
     };
     if (isAdmin) { out.flags = t.flags; out.abilities = t.abilities; out.penalty = t.penalty; }
     return out;
@@ -1332,8 +1344,9 @@ function buildState(g, auth) {
     settings: s,
     self,
     players,
-    photos: g.photos.filter((ph) => visibleIds.has(ph.pid)).map(({ id, pid, ts, quest }) => ({
-      id, pid, ts, quest: quest || null, questTitle: quest ? questTitle(g, quest) : null, featured: isAdmin ? gallerySet.has(id) : undefined,
+    photos: g.photos.filter((ph) => visibleIds.has(ph.pid)).map(({ id, pid, ts, quest, reactions }) => ({
+      id, pid, ts, quest: quest || null, questTitle: quest ? questTitle(g, quest) : null,
+      reactions: reactionCounts(reactions), myReaction: viewer && reactions ? reactions[viewer.id] || null : null, featured: isAdmin ? gallerySet.has(id) : undefined,
     })),
     messages: g.messages.filter((m) => isAdmin || m.kind !== 'cheat').slice(-40),
     effects,
@@ -1344,6 +1357,12 @@ function buildState(g, auth) {
   };
 }
 const roleText = (r) => (r === 'spectator' ? 'schaut jetzt zu' : `spielt jetzt als ${r === 'runner' ? 'Runner' : 'Hunter'}`);
+/** { pid: emoji } -> { emoji: Anzahl } */
+function reactionCounts(r) {
+  const out = {};
+  for (const e of Object.values(r || {})) out[e] = (out[e] || 0) + 1;
+  return out;
+}
 function adminSummary(g) {
   const ps = Object.values(g.players);
   return {
@@ -1379,6 +1398,85 @@ async function vpnGate(req, g, pl) {
 /* ------------------------------------------------------------------ */
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Profilbild (Issue #7), persönliche Galerie und Vitrine (Issue #8)   */
+/* ------------------------------------------------------------------ */
+const isJpeg = (b) => b.length > 100 && b[0] === 0xff && b[1] === 0xd8;
+/** Alle Fotos, die dieser Account in (noch vorhandenen) Spielen gemacht hat */
+function myPhotos(a) {
+  const out = [];
+  const shown = new Set((a.showcase || []).map((x) => `${x.code}:${x.photoId}`));
+  for (const g of Object.values(db.games)) {
+    const mine = new Set(Object.values(g.players).filter((p) => p.accountId === a.id).map((p) => p.id));
+    if (!mine.size) continue;
+    for (const ph of g.photos) {
+      if (!mine.has(ph.pid)) continue;
+      out.push({
+        code: g.code, gameName: g.name, id: ph.id, ts: ph.ts, quest: ph.quest || null, questTitle: ph.quest ? questTitle(g, ph.quest) : null,
+        reactions: reactionCounts(ph.reactions), showcased: shown.has(`${g.code}:${ph.id}`),
+      });
+    }
+  }
+  return out.sort((x, y) => y.ts - x.ts);
+}
+async function handleMe(req, res, url) {
+  const m = req.method, p = url.pathname;
+  // Öffentlich: Profilbild und ausgestellte Fotos
+  const av = p.match(/^\/api\/avatar\/([A-Za-z0-9_.-]{3,20})$/);
+  if (av && m === 'GET') {
+    const a = findAccount(av[1]);
+    const data = a && a.avatar && await fsp.readFile(path.join(AVATAR_DIR, `${a.id}.jpg`)).catch(() => null);
+    if (!data) throw new HttpError(404, 'Kein Profilbild');
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': data.length, 'Cache-Control': 'public, max-age=86400' });
+    return res.end(data);
+  }
+  const sc = p.match(/^\/api\/showcase\/([a-f0-9]{12})\.jpg$/);
+  if (sc && m === 'GET') {
+    const data = await fsp.readFile(path.join(SHOWCASE_DIR, `${sc[1]}.jpg`)).catch(() => null);
+    if (!data) throw new HttpError(404, 'Foto nicht gefunden');
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': data.length, 'Cache-Control': 'public, max-age=604800, immutable' });
+    return res.end(data);
+  }
+  const a = accountFromToken(req.headers['x-account'] || req.headers['x-token']);
+  if (!a) throw new HttpError(401, 'Bitte melde dich an');
+  if (p === '/api/me/avatar' && m === 'POST') {
+    rateLimit(req, 'avatar', 20, 3600e3);
+    const buf = await readBody(req, 512 * 1024);
+    if (!isJpeg(buf)) throw new HttpError(400, 'Bitte ein JPEG-Bild senden');
+    await fsp.writeFile(path.join(AVATAR_DIR, `${a.id}.jpg`), buf);
+    a.avatar = Date.now(); save();
+    return sendJSON(res, 200, { ok: true, avatar: a.avatar });
+  }
+  if (p === '/api/me/avatar' && m === 'DELETE') {
+    await fsp.unlink(path.join(AVATAR_DIR, `${a.id}.jpg`)).catch(() => {});
+    a.avatar = null; save();
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (p === '/api/me/photos' && m === 'GET') return sendJSON(res, 200, { photos: myPhotos(a) });
+  if (p === '/api/me/showcase' && m === 'POST') {
+    const b = await readJSON(req);
+    const g = db.games[String(b.code || '').toUpperCase()];
+    const ph = g && g.photos.find((x) => x.id === b.photoId);
+    if (!ph || g.players[ph.pid]?.accountId !== a.id) throw new HttpError(404, 'Das ist keins deiner Fotos');
+    a.showcase ||= [];
+    if (a.showcase.some((x) => x.code === g.code && x.photoId === ph.id)) throw new HttpError(409, 'Das Foto ist schon ausgestellt');
+    if (a.showcase.length >= MAX_SHOWCASE) throw new HttpError(409, `Höchstens ${MAX_SHOWCASE} Fotos auf dem Profil`);
+    const id = rid(6);
+    await fsp.copyFile(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`), path.join(SHOWCASE_DIR, `${id}.jpg`));
+    a.showcase.unshift({ id, code: g.code, photoId: ph.id, gameName: g.name, ts: ph.ts, caption: cleanText(b.caption, 120), quest: ph.quest ? questTitle(g, ph.quest) : null });
+    save();
+    return sendJSON(res, 201, { ok: true, showcase: a.showcase });
+  }
+  const del = p.match(/^\/api\/me\/showcase\/([a-f0-9]{12})$/);
+  if (del && m === 'DELETE') {
+    a.showcase = (a.showcase || []).filter((x) => x.id !== del[1]);
+    await fsp.unlink(path.join(SHOWCASE_DIR, `${del[1]}.jpg`)).catch(() => {});
+    save();
+    return sendJSON(res, 200, { ok: true, showcase: a.showcase });
+  }
+  throw new HttpError(404, 'Nicht gefunden');
+}
+
 const social = createSocial({
   getDb: () => db, save, HttpError, readJSON, sendJSON, accountFromToken, findAccount, isAdminAccount, rateLimit,
 });
@@ -1400,12 +1498,14 @@ async function handleApi(req, res, url) {
     else {
       season = 'all';
       rows = Object.values(db.accounts).filter((a) => a.verified)
-        .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats, badges: Object.keys(a.badges || {}) }))
+        .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats, badges: Object.keys(a.badges || {}), avatar: a.avatar || null }))
         .filter((r) => r.games > 0 || r.points > 0);
     }
     rows = rows.sort((a, b) => (b[sort] || 0) - (a[sort] || 0) || b.points - a.points).slice(0, 100);
     return sendJSON(res, 200, { sort, season, currentSeason: social.seasonKey(), rows });
   }
+  if (p.startsWith('/api/me/') || p.startsWith('/api/avatar/') || p.startsWith('/api/showcase/')) return handleMe(req, res, url);
+
   if (m === 'GET' && p === '/api/gallery') {
     return sendJSON(res, 200, { items: [...db.gallery].sort((a, b) => b.featuredAt - a.featuredAt).map(({ id, username, gameName, ts, caption, featuredAt, quest }) => ({ id, username, gameName, ts, caption, featuredAt, quest })) });
   }
@@ -1671,8 +1771,11 @@ async function handleGame(req, res, url, code, rest) {
     auth = { admin: true };
   }
   else {
-    const player = Object.values(g.players).find((pl) => safeEq(pl.token, t));
-    if (player) { player.lastSeen = Date.now(); auth = { player }; }
+    let player = Object.values(g.players).find((pl) => safeEq(pl.token, t));
+    if (player) player.lastSeen = Date.now();
+    // Mit dem Account-Token kommt man an seine eigenen Spiele (auch vergangene: Spielverlauf, Issue #7)
+    if (!player) { const acc = accountFromToken(t); if (acc) player = Object.values(g.players).find((pl) => pl.accountId === acc.id); }
+    if (player) auth = { player };
   }
   if (!auth) throw new HttpError(401, 'Nicht angemeldet oder aus dem Spiel entfernt');
 
@@ -1815,6 +1918,25 @@ async function handleGame(req, res, url, code, rest) {
     }
     await zip.finish();
     return;
+  }
+
+  // Emoji-Reaktion auf ein Foto (wie bei WhatsApp): eine pro Person, gleiches Emoji nochmal = entfernen
+  const rm = rest.match(/^photo\/([a-f0-9]{12})\/react$/);
+  if (rm && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    const photo = g.photos.find((x) => x.id === rm[1]);
+    if (!photo || !buildState(g, auth).photos.some((x) => x.id === photo.id)) throw new HttpError(404, 'Foto nicht gefunden');
+    if (photo.pid === pl.id) throw new HttpError(409, 'Auf eigene Fotos kannst du nicht reagieren');
+    const b = await readJSON(req);
+    const emoji = b.emoji ? String(b.emoji) : '';
+    if (emoji && !REACTIONS.includes(emoji)) throw new HttpError(400, 'Diese Reaktion gibt es nicht');
+    photo.reactions ||= {};
+    const before = photo.reactions[pl.id];
+    if (!emoji || before === emoji) delete photo.reactions[pl.id]; else photo.reactions[pl.id] = emoji;
+    const owner = g.players[photo.pid];
+    if (owner && emoji && before !== emoji) inbox(owner, `${emoji} ${pl.name} reagiert auf dein Foto`, 'info');
+    save(); notify(g.code);
+    return sendJSON(res, 200, { ok: true, reaction: photo.reactions[pl.id] || null });
   }
 
   const ph = rest.match(/^photo\/([a-f0-9]{12})$/);

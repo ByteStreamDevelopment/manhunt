@@ -23,9 +23,21 @@ data class Player(
     val frozen: Boolean = false,
     /** Als Runner gefangen und jetzt Hunter */
     val converted: Boolean = false,
+    /** Zeitstempel des Profilbilds (null = keins) – Bild unter /api/avatar/<name> */
+    val avatar: Long? = null,
 )
 
-data class PhotoRef(val id: String, val pid: String, val ts: Long, val quest: String? = null, val questTitle: String? = null)
+data class PhotoRef(
+    val id: String, val pid: String, val ts: Long, val quest: String? = null, val questTitle: String? = null,
+    /** Emoji -> Anzahl (Issue #6) */
+    val reactions: Map<String, Int> = emptyMap(),
+    val myReaction: String? = null,
+)
+
+/** Erlaubte Reaktionen (wie auf dem Server) */
+val REACTIONS = listOf("👍", "❤️", "😂", "😮", "🔥", "👏", "🤩", "👎")
+
+fun reactionText(r: Map<String, Int>) = r.entries.sortedByDescending { it.value }.joinToString(" ") { (e, n) -> if (n > 1) "$e$n" else e }
 data class Msg(val id: String, val ts: Long, val text: String, val kind: String)
 
 data class Settings(
@@ -160,7 +172,14 @@ data class LobbyInfo(
 
 data class Account(val token: String, val id: String, val username: String, val email: String, val isAdmin: Boolean)
 
-data class AbilityDef(val key: String, val team: String, val icon: String, val name: String, val desc: String, val durationSec: Int, val target: String?, val cooldownSec: Int = 0)
+data class AbilityDef(
+    val key: String, val team: String, val icon: String, val name: String, val desc: String, val durationSec: Int, val target: String?,
+    val cooldownSec: Int = 0,
+    /** common | rare | epic (Issue #9) */
+    val rarity: String = "common",
+) {
+    val rarityLabel get() = when (rarity) { "epic" -> "episch"; "rare" -> "selten"; else -> "häufig" }
+}
 data class BadgeDef(val key: String, val icon: String, val name: String, val desc: String)
 data class QuestDef(val key: String, val team: String, val kind: String, val icon: String, val title: String, val desc: String, val minutes: Int, val points: Int)
 data class Catalog(val abilities: Map<String, AbilityDef>, val quests: Map<String, QuestDef>, val badges: Map<String, BadgeDef> = emptyMap()) {
@@ -180,6 +199,7 @@ data class BoardRow(
     val username: String, val isAdmin: Boolean, val points: Int, val games: Int, val wins: Int, val catches: Int,
     val quests: Int, val pickups: Int, val photos: Int, val featured: Int, val surviveMin: Int,
     val badges: List<String> = emptyList(),
+    val avatar: Long? = null,
 )
 
 /* ---------------- Spielleitung (Admin in der App) ---------------- */
@@ -206,15 +226,29 @@ fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").ob
 data class HistoryEntry(
     val code: String, val name: String, val endedAt: Long, val role: String, val converted: Boolean,
     val caught: Boolean, val result: String, val points: Int, val catches: Int,
+    /** Spiel liegt noch auf dem Server -> im Spielverlauf öffnen */
+    val available: Boolean = false,
 )
+data class ShowcaseItem(val id: String, val code: String, val gameName: String, val ts: Long, val caption: String, val quest: String?)
+/** Eigenes Foto aus einem Spiel (persönliche Galerie, Issue #8) */
+data class MyPhoto(
+    val code: String, val gameName: String, val id: String, val ts: Long, val questTitle: String?,
+    val reactions: Map<String, Int>, val showcased: Boolean,
+)
+
+fun parseMyPhotos(j: JSONObject): List<MyPhoto> = j.getJSONArray("photos").objects().map {
+    MyPhoto(it.getString("code"), it.optString("gameName"), it.getString("id"), it.getLong("ts"), it.strOrNull("questTitle"), parseReactions(it), it.optBoolean("showcased"))
+}
 data class SeasonEntry(val season: String, val points: Int, val games: Int, val wins: Int, val catches: Int, val rank: Int?, val of: Int?)
 data class Profile(
     val username: String, val isAdmin: Boolean, val createdAt: Long, val online: Boolean, val self: Boolean,
     /** none | requested | incoming | friends | null (nicht angemeldet / eigenes Profil) */
     val friendship: String?,
     val stats: Map<String, Int>, val badges: Map<String, Long>, val history: List<HistoryEntry>, val seasons: List<SeasonEntry>,
+    val avatar: Long? = null,
+    val showcase: List<ShowcaseItem> = emptyList(),
 )
-data class Friend(val username: String, val online: Boolean, val lastSeen: Long?)
+data class Friend(val username: String, val online: Boolean, val lastSeen: Long?, val avatar: Long? = null)
 data class Invite(val id: String, val from: String, val code: String, val gameName: String, val ts: Long)
 data class Friends(val friends: List<Friend>, val incoming: List<Friend>, val outgoing: List<Friend>, val invites: List<Invite>)
 data class Seasons(val current: String, val list: List<String>)
@@ -230,7 +264,7 @@ fun parseProfile(j: JSONObject): Profile {
         j.optJSONArray("history")?.objects()?.map {
             HistoryEntry(
                 it.optString("code"), it.optString("name"), it.optLong("endedAt"), it.optString("role"), it.optBoolean("converted"),
-                it.optBoolean("caught"), it.optString("result"), it.optInt("points"), it.optInt("catches"),
+                it.optBoolean("caught"), it.optString("result"), it.optInt("points"), it.optInt("catches"), it.optBoolean("available"),
             )
         } ?: emptyList(),
         j.optJSONArray("seasons")?.objects()?.map {
@@ -239,11 +273,15 @@ fun parseProfile(j: JSONObject): Profile {
                 if (it.has("rank")) it.optInt("rank") else null, if (it.has("of")) it.optInt("of") else null,
             )
         } ?: emptyList(),
+        j.longOrNull("avatar"),
+        j.optJSONArray("showcase")?.objects()?.map {
+            ShowcaseItem(it.getString("id"), it.optString("code"), it.optString("gameName"), it.optLong("ts"), it.optString("caption"), it.strOrNull("quest"))
+        } ?: emptyList(),
     )
 }
 
 fun parseFriends(j: JSONObject): Friends {
-    fun list(k: String) = j.optJSONArray(k)?.objects()?.map { Friend(it.getString("username"), it.optBoolean("online"), it.longOrNull("lastSeen")) } ?: emptyList()
+    fun list(k: String) = j.optJSONArray(k)?.objects()?.map { Friend(it.getString("username"), it.optBoolean("online"), it.longOrNull("lastSeen"), it.longOrNull("avatar")) } ?: emptyList()
     return Friends(
         list("friends"), list("incoming"), list("outgoing"),
         j.optJSONArray("invites")?.objects()?.map { Invite(it.getString("id"), it.optString("from"), it.optString("code"), it.optString("gameName"), it.optLong("ts")) } ?: emptyList(),
@@ -298,13 +336,18 @@ fun parseInfo(j: JSONObject): LobbyInfo {
     )
 }
 
+private fun parseReactions(o: JSONObject): Map<String, Int> {
+    val r = o.optJSONObject("reactions") ?: return emptyMap()
+    return r.keys().asSequence().associateWith { r.optInt(it) }
+}
+
 fun parseCatalog(j: JSONObject): Catalog {
     val a = j.getJSONObject("abilities")
     val q = j.getJSONObject("quests")
     return Catalog(
         abilities = a.keys().asSequence().associateWith { k ->
             val o = a.getJSONObject(k)
-            AbilityDef(k, o.optString("team"), o.optString("icon"), o.optString("name"), o.optString("desc"), o.optInt("durationSec"), o.strOrNull("target"), o.optInt("cooldownSec"))
+            AbilityDef(k, o.optString("team"), o.optString("icon"), o.optString("name"), o.optString("desc"), o.optInt("durationSec"), o.strOrNull("target"), o.optInt("cooldownSec"), o.optString("rarity", "common"))
         },
         quests = q.keys().asSequence().associateWith { k ->
             val o = q.getJSONObject(k)
@@ -326,6 +369,7 @@ fun parseBoard(j: JSONObject): List<BoardRow> = j.getJSONArray("rows").objects()
         it.getString("username"), it.optBoolean("isAdmin"), it.optInt("points"), it.optInt("games"), it.optInt("wins"),
         it.optInt("catches"), it.optInt("quests"), it.optInt("pickups"), it.optInt("photos"), it.optInt("featured"), it.optInt("surviveMin"),
         it.optJSONArray("badges")?.let { a -> List(a.length()) { i -> a.getString(i) } } ?: emptyList(),
+        it.longOrNull("avatar"),
     )
 }
 
@@ -358,6 +402,7 @@ fun parseState(j: JSONObject): GameState {
             live = p.strOrNull("live"),
             frozen = p.optBoolean("frozen"),
             converted = p.optBoolean("converted"),
+            avatar = p.longOrNull("avatar"),
         )
     }
     return GameState(
@@ -423,7 +468,9 @@ fun parseState(j: JSONObject): GameState {
             spectatorDelaySec = me.optInt("spectatorDelaySec"),
         ),
         players = players,
-        photos = j.getJSONArray("photos").objects().map { PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts"), it.strOrNull("quest"), it.strOrNull("questTitle")) },
+        photos = j.getJSONArray("photos").objects().map {
+            PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts"), it.strOrNull("quest"), it.strOrNull("questTitle"), parseReactions(it), it.strOrNull("myReaction"))
+        },
         messages = j.getJSONArray("messages").objects().map { Msg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) },
         effects = j.optJSONArray("effects")?.objects()?.map {
             Effect(it.getString("id"), it.getString("key"), it.optString("team"), it.strOrNull("byName"), it.getLong("until"), it.optBoolean("onMe"))

@@ -11,57 +11,62 @@
  * target: 'caughtRunner' = man wählt einen gefangenen Runner aus
  * start: Standard-Anzahl zum Spielstart, obtainable: kann man im Spiel bekommen
  * cooldownSec: so lange muss man warten, bis man dieselbe Fähigkeit wieder einsetzen kann
+ * rarity: common | rare | epic – wie oft sie beim zufälligen Verteilen (Quests, Pickups, Abwürfe) gezogen wird
+ *         (Gewichte in RARITY). Starke Fähigkeiten wie Freeze und Radar sind episch und damit selten.
  */
+/** Gewichte beim Ziehen: Eine häufige Fähigkeit kommt etwa 6-mal so oft wie eine epische. */
+const RARITY = { common: 6, rare: 3, epic: 1 };
+
 const ABILITIES = {
   // ---------------- Runner ----------------
   freeze: {
-    team: 'runner', icon: '🧊', name: 'Freeze', durationSec: 90, cooldownSec: 300, start: 1, obtainable: true,
+    team: 'runner', icon: '🧊', name: 'Freeze', durationSec: 60, cooldownSec: 900, start: 0, rarity: 'epic', obtainable: true,
     desc: 'Alle Hunter sind eingefroren: Sie sehen keine Runner mehr und können niemanden fangen.',
   },
   cloak: {
-    team: 'runner', icon: '👻', name: 'Tarnkappe', durationSec: 180, cooldownSec: 240, start: 0, obtainable: true,
+    team: 'runner', icon: '👻', name: 'Tarnkappe', durationSec: 120, cooldownSec: 600, start: 0, rarity: 'rare', obtainable: true,
     desc: 'Du verschwindest von der Karte der Hunter.',
   },
   decoy: {
-    team: 'runner', icon: '🎭', name: 'Köder', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
+    team: 'runner', icon: '🎭', name: 'Köder', durationSec: 180, cooldownSec: 600, start: 0, rarity: 'rare', obtainable: true,
     desc: 'Hunter sehen dich an einer falschen Position, 300–600 m entfernt.',
   },
   fog: {
-    team: 'runner', icon: '🌫️', name: 'Nebelwand', durationSec: 300, cooldownSec: 180, start: 0, obtainable: true,
+    team: 'runner', icon: '🌫️', name: 'Nebelwand', durationSec: 180, cooldownSec: 480, start: 0, rarity: 'common', obtainable: true,
     desc: 'Deine Position wird für Hunter um bis zu 400 m zusätzlich verwischt.',
   },
   photoJoker: {
-    team: 'runner', icon: '🃏', name: 'Fotojoker', durationSec: 0, cooldownSec: 0, start: 0, obtainable: true,
+    team: 'runner', icon: '🃏', name: 'Fotojoker', durationSec: 0, cooldownSec: 0, start: 0, rarity: 'common', obtainable: true,
     desc: 'Die aktuelle Foto-Runde gilt als erledigt. Beendet auch einen Live-Standort wegen fehlendem Foto.',
   },
   rescue: {
-    team: 'runner', icon: '🔓', name: 'Befreiung', durationSec: 0, cooldownSec: 300, start: 0, obtainable: true, target: 'caughtRunner',
+    team: 'runner', icon: '🔓', name: 'Befreiung', durationSec: 0, cooldownSec: 900, start: 0, rarity: 'rare', obtainable: true, target: 'caughtRunner',
     desc: 'Befreit einen gefangenen Runner, er ist sofort wieder im Spiel.',
   },
   // ---------------- Hunter ----------------
   radar: {
-    team: 'hunter', icon: '📡', name: 'Radar', durationSec: 180, cooldownSec: 300, start: 1, obtainable: true,
+    team: 'hunter', icon: '📡', name: 'Radar', durationSec: 90, cooldownSec: 900, start: 0, rarity: 'epic', obtainable: true,
     desc: 'Alle Hunter sehen den Live-Standort aller Runner, exakt und alle paar Sekunden aktualisiert.',
   },
   ping: {
-    team: 'hunter', icon: '🎯', name: 'Peilung', durationSec: 60, cooldownSec: 120, start: 0, obtainable: true,
+    team: 'hunter', icon: '🎯', name: 'Peilung', durationSec: 45, cooldownSec: 300, start: 0, rarity: 'common', obtainable: true,
     desc: 'Der nächste Runner muss sofort seinen exakten Standort senden und bleibt eine Minute live.',
   },
   photoOrder: {
-    team: 'hunter', icon: '📸', name: 'Fotobefehl', durationSec: 120, cooldownSec: 300, start: 0, obtainable: true,
+    team: 'hunter', icon: '📸', name: 'Fotobefehl', durationSec: 120, cooldownSec: 600, start: 0, rarity: 'rare', obtainable: true,
     desc: 'Alle Runner müssen innerhalb von 2 Minuten ein Foto hochladen, sonst wird ihr Standort live geteilt.',
   },
   tracker: {
-    team: 'hunter', icon: '🐾', name: 'Spurenleser', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
+    team: 'hunter', icon: '🐾', name: 'Spurenleser', durationSec: 180, cooldownSec: 600, start: 0, rarity: 'rare', obtainable: true,
     desc: 'Hunter sehen die komplette, exakte Route aller Runner.',
   },
   thaw: {
-    team: 'hunter', icon: '🔥', name: 'Eisbrecher', durationSec: 0, cooldownSec: 0, start: 0, obtainable: true,
+    team: 'hunter', icon: '🔥', name: 'Eisbrecher', durationSec: 0, cooldownSec: 0, start: 0, rarity: 'rare', obtainable: true,
     desc: 'Beendet einen Freeze sofort für alle Hunter.',
   },
   // ---------------- Beide ----------------
   shield: {
-    team: 'any', icon: '🛡️', name: 'Schild', durationSec: 300, cooldownSec: 240, start: 0, obtainable: true,
+    team: 'any', icon: '🛡️', name: 'Schild', durationSec: 180, cooldownSec: 600, start: 1, rarity: 'common', obtainable: true,
     desc: 'Du bist immun gegen Fähigkeiten des anderen Teams (Freeze, Radar, Peilung, Fotobefehl).',
   },
 };
@@ -80,6 +85,9 @@ const ABILITIES = {
  *  edge       – den Rand der Spielzone berühren
  *  pickup     – eine Fähigkeit auf der Karte einsammeln
  */
+/** Diese (schweren) Quests geben standardmäßig eine Fähigkeit, alle anderen nur Punkte. */
+const ABILITY_REWARD_QUESTS = ['r_dare', 'r_statue', 'r_edge', 'h_bounty', 'h_pincer', 'h_scent'];
+
 const QUESTS = {
   // ---------------- Runner ----------------
   r_red: { team: 'runner', kind: 'photo', icon: '🟥', title: 'Rot sehen', minutes: 10, points: 40,
@@ -155,10 +163,10 @@ const POINTS = {
 };
 
 function catalogForClients() {
-  const ab = {}; for (const [k, a] of Object.entries(ABILITIES)) ab[k] = { key: k, team: a.team, icon: a.icon, name: a.name, desc: a.desc, durationSec: a.durationSec, cooldownSec: a.cooldownSec, target: a.target || null };
+  const ab = {}; for (const [k, a] of Object.entries(ABILITIES)) ab[k] = { key: k, team: a.team, icon: a.icon, name: a.name, desc: a.desc, durationSec: a.durationSec, cooldownSec: a.cooldownSec, rarity: a.rarity || 'common', target: a.target || null };
   const qu = {}; for (const [k, q] of Object.entries(QUESTS)) qu[k] = { key: k, team: q.team, kind: q.kind, icon: q.icon, title: q.title, desc: q.desc, minutes: q.minutes, points: q.points };
   const badges = BADGES.map(({ key, icon, name, desc }) => ({ key, icon, name, desc }));
   return { abilities: ab, quests: qu, badges };
 }
 
-module.exports = { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients };
+module.exports = { ABILITIES, QUESTS, POINTS, BADGES, RARITY, ABILITY_REWARD_QUESTS, catalogForClients };

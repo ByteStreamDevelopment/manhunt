@@ -11,7 +11,7 @@
   const adminMode = new URLSearchParams(location.search).get('admin') === '1' && !!adminToken;
   let ident = null;
   try { ident = JSON.parse(localStorage.getItem(IDKEY)); } catch { /* keine Anmeldung */ }
-  const TOKEN = adminMode ? adminToken : ident && ident.token;
+  let TOKEN = adminMode ? adminToken : ident && ident.token;
   const baseTitle = `Manhunt ${CODE}`;
   document.title = baseTitle;
 
@@ -645,21 +645,48 @@
     $('#tab-players').replaceChildren(card('', h('h3', {}, `Spieler (${S.players.length})`), S.players.length ? h('ul', { class: 'plist' }, rows) : h('p', { class: 'muted' }, 'Noch niemand beigetreten. Teile den Link mit deinen Mitspielern.')));
     updateClocks();
   }
+  const REACTIONS = ['👍', '❤️', '😂', '😮', '🔥', '👏', '🤩', '👎'];
+  const reactionText = (r) => Object.entries(r || {}).sort((a, b) => b[1] - a[1]).map(([e, n]) => `${e}${n > 1 ? n : ''}`).join(' ');
   function renderPhotos() {
-    const sig = S.photos.map((p) => p.id).join(',');
+    const sig = S.photos.map((p) => p.id + reactionText(p.reactions) + (p.myReaction || '')).join(',');
     $('#tabbtn-photos').textContent = S.photos.length ? `Fotos (${S.photos.length})` : 'Fotos';
+    if (lbPhoto && $('#lightbox').open) { const cur = S.photos.find((x) => x.id === lbPhoto); if (cur) renderReactions(cur); }
     if (sig === photoSig) return;
     photoSig = sig;
     const names = Object.fromEntries(S.players.map((p) => [p.id, p.name]));
     const list = [...S.photos].sort((a, b) => b.ts - a.ts);
     const grid = list.length ? h('div', { class: 'photos' }, list.map((ph) => {
       const src = `/api/g/${CODE}/photo/${ph.id}?t=${encodeURIComponent(TOKEN)}`;
-      const cap = `${names[ph.pid] || '?'}, ${clock(ph.ts)} Uhr`;
-      return h('figure', {}, h('button', { onclick: () => openLightbox(src, cap), 'aria-label': `Foto von ${cap}` }, h('img', { src, alt: '', loading: 'lazy' })), h('figcaption', {}, cap));
+      const cap = `${names[ph.pid] || '?'}, ${clock(ph.ts)} Uhr${ph.questTitle ? ` · ${ph.questTitle}` : ''}`;
+      return h('figure', {}, h('button', { onclick: () => openLightbox(ph, src, cap), 'aria-label': `Foto von ${cap}` }, h('img', { src, alt: '', loading: 'lazy' })),
+        h('figcaption', {}, cap, ph.reactions && Object.keys(ph.reactions).length ? h('div', { class: 'reacts' }, reactionText(ph.reactions)) : null));
     })) : h('p', { class: 'muted' }, S.settings.photosEnabled ? 'Noch keine Fotos. Sie erscheinen hier, sobald Runner welche hochladen.' : 'Fotos sind in diesem Spiel ausgeschaltet.');
     $('#tab-photos').replaceChildren(card('', h('h3', {}, 'Fotos'), grid));
   }
-  function openLightbox(src, cap) { $('#lbImg').src = src; $('#lbCap').textContent = cap; $('#lightbox').showModal(); }
+  let lbPhoto = null;
+  function openLightbox(ph, src, cap) {
+    lbPhoto = ph.id;
+    $('#lbImg').src = src; $('#lbCap').textContent = cap;
+    renderReactions(ph);
+    $('#lightbox').showModal();
+  }
+  /* Emoji-Reaktionen wie bei WhatsApp (Issue #6): eine pro Person, nochmal tippen = entfernen */
+  function renderReactions(ph) {
+    const box = $('#lbReact'); if (!box) return;
+    const own = ph.pid === me().id;
+    const canReact = !own && (me().role === 'runner' || me().role === 'hunter' || me().role === 'spectator');
+    box.replaceChildren(
+      h('div', { class: 'reacts' }, reactionText(ph.reactions) || (own ? 'Noch keine Reaktionen auf dein Foto.' : '')),
+      canReact ? h('div', { class: 'reactbar' }, REACTIONS.map((e) => h('button', {
+        class: ph.myReaction === e ? 'on' : '', 'aria-label': `Reagieren mit ${e}`,
+        onclick: async () => {
+          try {
+            const r = await api(`/api/g/${CODE}/photo/${ph.id}/react`, { method: 'POST', token: TOKEN, body: { emoji: e } });
+            ph.myReaction = r.reaction; refresh();
+          } catch (x) { toast(x.message); }
+        },
+      }, e))) : null);
+  }
 
   /* --- Uhren und Live-Felder (jede Sekunde) --- */
   function updateClocks() {
@@ -798,5 +825,11 @@
     if (name === 'chat' && S) { $('#tabbtn-chat').textContent = 'Chat'; renderChat(true); }
   }
 
-  if (TOKEN) startApp(); else showJoin();
+  if (TOKEN) startApp();
+  else if (account.token()) {
+    // Mit dem Account schon in diesem Spiel (z. B. in der App beigetreten) oder vergangenes Spiel aus dem Spielverlauf
+    api(`/api/g/${CODE}/state`, { token: account.token() })
+      .then(() => { TOKEN = account.token(); startApp(); })
+      .catch(() => showJoin());
+  } else showJoin();
 })();

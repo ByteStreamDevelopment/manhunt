@@ -407,7 +407,8 @@ fun LeaderboardScreen(onBack: () -> Unit, openProfile: (String) -> Unit) {
                         ) {
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (i < 3) listOf("🥇", "🥈", "🥉")[i] else "${i + 1}.", Modifier.width(40.dp), fontSize = 20.sp, textAlign = TextAlign.Center)
-                                Column(Modifier.weight(1f)) {
+                                Avatar(r.username, r.avatar, 36.dp)
+                                Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                     Text(r.username + (if (r.isAdmin) " 👑" else ""), fontWeight = FontWeight.Bold)
                                     if (r.badges.isNotEmpty()) Text(r.badges.mapNotNull { k -> cat?.badges?.get(k)?.icon }.joinToString(" "))
                                     Text(

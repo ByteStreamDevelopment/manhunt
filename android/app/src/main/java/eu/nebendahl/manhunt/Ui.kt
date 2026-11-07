@@ -127,6 +127,7 @@ fun App(inviteCode: String?) {
     var screen by rememberSaveable { mutableStateOf("main") }
     var profileOf by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCode by rememberSaveable { mutableStateOf<String?>(null) }
+    var archiveCode by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { GameRepository.checkAccount(); GameRepository.loadCatalog() }
     val s = session
     val a = account
@@ -138,7 +139,9 @@ fun App(inviteCode: String?) {
             screen == "profile" && profileOf != null -> ProfileScreen(
                 profileOf!!, onBack = { screen = "main" }, openProfile = openProfile,
                 joinGame = { c -> pendingCode = c; screen = "main" },
+                openArchive = { c -> archiveCode = c; screen = "archive" },
             )
+            screen == "archive" && archiveCode != null && a != null -> ArchiveGameScreen(a, archiveCode!!) { screen = "profile" }
             screen == "leaderboard" -> LeaderboardScreen(onBack = { screen = "main" }, openProfile = openProfile)
             screen == "gallery" -> GalleryScreen { screen = "main" }
             screen == "admin" && a != null -> AdminScreen(a) { screen = "main" }
@@ -261,6 +264,12 @@ fun GameScreen(openLeaderboard: () -> Unit) {
     LaunchedEffect(Unit) { GameRepository.toasts.collect { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }
     val shooter = rememberPhotoShooter()
     val activeQuests = g?.self?.quests?.count { it.status == "active" } ?: 0
+    // Wichtiger Hinweis im Aktionen-Tab? Dann zeigt das Tab-Symbol ein „!“
+    val lastPhotoLocal by GameRepository.localLastPhoto.collectAsState()
+    val alert = g != null && g.game.status == "running" && g.isPlayer() && (
+        !hasLocPerm || !hasFine || err != null || g.self.live != null || g.self.photoOrderDue != null ||
+            g.photoDue(serverNow, lastPhotoLocal)?.overdue == true || g.me()?.outside == true
+        )
     // Ungelesene Chat-Nachrichten (von anderen) seit dem letzten Öffnen des Chat-Tabs
     var seenChatCount by rememberSaveable { mutableIntStateOf(-1) }
     val chatCount = g?.chat?.count { it.pid != g.self.id } ?: 0
@@ -299,6 +308,7 @@ fun GameScreen(openLeaderboard: () -> Unit) {
                             val badge = when {
                                 i == 4 && tab != 4 && newChat > 0 -> "$newChat"
                                 i == 3 && tab != 3 && newPhotos > 0 -> "$newPhotos"
+                                i == 1 && tab != 1 && alert -> "!"
                                 i == 1 && tab != 1 && activeQuests > 0 -> "$activeQuests"
                                 else -> null
                             }
@@ -319,6 +329,8 @@ fun GameScreen(openLeaderboard: () -> Unit) {
                     }
                 }
             } else {
+                // Issue #6: Hinweise und Countdowns stehen nur im Aktionen-Tab, die Karte bleibt frei
+                if (tab == 1) {
                 err?.let { Banner("Verbindungsproblem: $it", BannerKind.Error) }
                 if (g.game.status != "ended" && g.isPlayer()) {
                     if (!hasLocPerm) {
@@ -340,6 +352,7 @@ fun GameScreen(openLeaderboard: () -> Unit) {
                     }
                 }
                 StatusBanners(g, serverNow) { tab = 3 }
+                }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (tab) {
                         0 -> MapTab(g, serverNow, focus) { focus = null }
@@ -390,6 +403,8 @@ private fun StatusBanners(st: GameState, serverNow: Long, openPhotos: () -> Unit
     val fix by GameRepository.myFix.collectAsState()
     val lastSent by GameRepository.lastSentAt.collectAsState()
     val localLastPhoto by GameRepository.localLastPhoto.collectAsState()
+    val myFix by GameRepository.myFix.collectAsState()
+    nearestRunnerText(st, myFix, serverNow)?.let { Banner("🎯 $it") }
     when (g.status) {
         "lobby" -> Banner("Warte auf den Start durch die Spielleitung. Danach teilen Runner ihren Standort alle ${fmtInterval(s.locationIntervalSec)}.")
         "ended" -> {
@@ -478,7 +493,8 @@ private fun PlayersTab(st: GameState, serverNow: Long, showOnMap: (String) -> Un
         items(sorted, key = { it.id }) { p ->
             Card(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Avatar(p.name, p.avatar, 36.dp)
+                    Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             (if (p.role == "runner") "🏃 " else "🎯 ") + p.name + if (p.id == st.self.id) " (du)" else "",
                             fontWeight = FontWeight.Bold,
@@ -552,10 +568,10 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
     val cat by GameRepository.catalog.collectAsState()
     val busy = shooter.busy
     fun shoot() = shooter.shoot(null)
+    val ctx = LocalContext.current
 
     val due = st.photoDue(serverNow, localLastPhoto)
     val sorted = st.photos.sortedByDescending { it.ts }
-    val ctx = LocalContext.current
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -625,17 +641,35 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
     }
 
     open?.let { ph ->
-        Dialog(onDismissRequest = { open = null }) {
-            val bmp = rememberPhoto(ph.id)
-            Card(Modifier.fillMaxWidth().clickable { open = null }) {
-                Column(Modifier.padding(8.dp)) {
-                    val b = bmp
-                    if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
-                    else Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> " · 📜 " + (ph.questTitle ?: cat?.quest(q)?.title ?: q) } ?: ""), Modifier.padding(top = 6.dp))
-                }
-            }
+        val s = GameRepository.session.value
+        val scope = rememberCoroutineScope()
+        if (s != null) {
+            FullscreenPhotoViewer(
+                viewerPhotos(st, s.code, s.token, cat), sorted.indexOfFirst { it.id == ph.id }.coerceAtLeast(0),
+                onDismiss = { open = null },
+                onReact = { vp, e ->
+                    scope.launch {
+                        try { GameRepository.react(vp.key.substringAfterLast(':'), e) }
+                        catch (x: ApiException) { Toast.makeText(ctx, x.message, Toast.LENGTH_SHORT).show() }
+                    }
+                },
+            )
         }
+    }
+}
+
+/** Fotos eines Spiels für die Vollbild-Ansicht (neueste zuerst). Reagieren geht nicht auf eigene Fotos. */
+internal fun viewerPhotos(st: GameState, code: String, token: String, cat: Catalog?): List<ViewerPhoto> {
+    val names = st.players.associate { it.id to it.name }
+    return st.photos.sortedByDescending { it.ts }.map { ph ->
+        ViewerPhoto(
+            key = "$code:${ph.id}",
+            title = names[ph.pid] ?: "?",
+            subtitle = "${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> " · 📜 " + (ph.questTitle ?: cat?.quest(q)?.title ?: q) } ?: ""),
+            reactions = ph.reactions, myReaction = ph.myReaction,
+            canReact = ph.pid != st.self.id && st.self.role != "admin",
+            load = { Api.photoBytes(code, token, ph.id) },
+        )
     }
 }
 
@@ -655,7 +689,7 @@ private fun PhotoThumb(ph: PhotoRef, name: String, onClick: () -> Unit) {
             if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else CircularProgressIndicator(Modifier.align(Alignment.Center))
             Text(
-                "$name · ${clock(ph.ts)}",
+                "$name · ${clock(ph.ts)}" + (if (ph.reactions.isNotEmpty()) "  " + reactionText(ph.reactions) else ""),
                 Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color(0x99000000)).padding(4.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White,

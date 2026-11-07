@@ -39,6 +39,8 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.4: Fotos im Vollbild mit Emoji-Reaktionen, Karten-Tab nur mit Karte (Hinweise im Aktionen-Tab),
+  Spielverlauf mit vergangenen Runden, Profilbild, persönliche Galerie und Vitrine, seltenere Fähigkeiten
 - Neu in 2.3: Chat für alle (🌍), alle Fotos nach Spielende als ZIP, eigene Quests im Einstellungs-Formular,
   Spielleitung ohne Vorteile, wenn sie selbst mitspielt
 - Neu in 2.2: Profil mit Verlauf, Saisons und Abzeichen; Freunde und Einladungen (mit Benachrichtigung, solange die App offen ist);

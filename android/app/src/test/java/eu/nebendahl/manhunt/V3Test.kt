@@ -55,7 +55,7 @@ class V3Test {
     @Test fun badgesCatalogAdmin() {
         val c = parseCatalog(res("catalog.json"))
         assertTrue(c.badges.size >= 15)
-        assertEquals(300, c.abilities.getValue("freeze").cooldownSec)
+        assertEquals(900, c.abilities.getValue("freeze").cooldownSec)
         val rows = parseBoard(res("leaderboard_v3.json"))
         assertTrue(rows.all { "firstGame" in it.badges })
         assertTrue(rows.none { it.username == "Zoe" }) // Zuschauer zählen nicht

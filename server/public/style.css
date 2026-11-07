@@ -258,3 +258,13 @@ a.name { text-decoration: none; font-weight: 800; }
 .pickup-pin.drop { font-size: 32px; animation: dropPulse 1.2s infinite alternate; }
 @keyframes dropPulse { from { transform: scale(1); } to { transform: scale(1.18); } }
 @media (prefers-reduced-motion: reduce) { .pickup-pin.drop { animation: none; } }
+
+/* Reaktionen auf Fotos */
+.reacts { font-size: .95rem; letter-spacing: .05em; margin: .2rem 0; }
+.reactbar { display: flex; gap: .3rem; flex-wrap: wrap; margin: .3rem 0 .6rem; }
+.reactbar button { font-size: 1.5rem; background: #fff; border: 2px solid var(--ink); padding: .1rem .4rem; cursor: pointer; line-height: 1.3; }
+.reactbar button.on { background: var(--gold); }
+/* Profilbilder */
+.avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--ink); background: #fff; vertical-align: middle; }
+.avatar.big { width: 96px; height: 96px; }
+.avatar.small { width: 26px; height: 26px; margin-right: .3rem; }

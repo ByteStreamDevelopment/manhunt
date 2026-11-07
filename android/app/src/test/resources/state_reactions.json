@@ -1,0 +1,367 @@
+{
+  "now": 1794036019611,
+  "game": {
+    "code": "M3QGQ",
+    "name": "Fotorunde",
+    "status": "running",
+    "startedAt": 1794036019590,
+    "endedAt": null,
+    "releaseAt": 1794036019590
+  },
+  "settings": {
+    "locationIntervalSec": 60,
+    "headStartMin": 0,
+    "autoEndAfterMin": 0,
+    "showTrail": true,
+    "fuzzMeters": 0,
+    "huntersVisibleToHunters": true,
+    "huntersVisibleToRunners": false,
+    "runnersVisibleToRunners": true,
+    "showDistance": true,
+    "photosEnabled": true,
+    "photoIntervalMin": 15,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 60,
+    "livePenaltyUntil": "nextRound",
+    "liveIntervalSec": 5,
+    "caughtEnabled": true,
+    "caughtBecomeHunter": true,
+    "freezeImmunitySec": 120,
+    "chatEnabled": true,
+    "allChatEnabled": true,
+    "voiceEnabled": true,
+    "spectatorsEnabled": true,
+    "spectatorDelaySec": 120,
+    "autoEndWhenAllCaught": true,
+    "zoneEnabled": false,
+    "zoneLat": 0,
+    "zoneLng": 0,
+    "zoneRadiusM": 1000,
+    "abilitiesEnabled": true,
+    "questsEnabled": false,
+    "questIntervalMin": 8,
+    "questMaxActive": 1,
+    "pickupsEnabled": false,
+    "pickupIntervalMin": 12,
+    "pickupMax": 3,
+    "pickupSpacingM": 1000,
+    "pickupCollectM": 40,
+    "pickupLifetimeMin": 30,
+    "pickupSearchM": 3000,
+    "pickupRandomFallback": true,
+    "supplyDropsEnabled": false,
+    "supplyDropIntervalMin": 20,
+    "supplyDropWarnMin": 5,
+    "supplyDropAbilities": 2,
+    "antiVpn": "warn",
+    "antiSpoof": "warn",
+    "maxSpeedKmh": 45,
+    "abilities": {
+      "freeze": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 60,
+        "cooldownSec": 900
+      },
+      "cloak": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 120,
+        "cooldownSec": 600
+      },
+      "decoy": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 600
+      },
+      "fog": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 480
+      },
+      "photoJoker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "rescue": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 900
+      },
+      "radar": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 90,
+        "cooldownSec": 900
+      },
+      "ping": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 45,
+        "cooldownSec": 300
+      },
+      "photoOrder": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 120,
+        "cooldownSec": 600
+      },
+      "tracker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 600
+      },
+      "thaw": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "shield": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 600
+      }
+    },
+    "quests": {
+      "r_red": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "none"
+      },
+      "r_tourist": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "none"
+      },
+      "r_number": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "none"
+      },
+      "r_safari": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "none"
+      },
+      "r_courier": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "none"
+      },
+      "r_shopping": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 60,
+        "reward": "none"
+      },
+      "r_dare": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 90,
+        "reward": "random"
+      },
+      "r_statue": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_edge": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_sprint": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 50,
+        "reward": "none"
+      },
+      "r_loot": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "none"
+      },
+      "h_patrol": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "none"
+      },
+      "h_scent": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 70,
+        "reward": "random"
+      },
+      "h_bounty": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 120,
+        "reward": "random"
+      },
+      "h_pincer": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 100,
+        "reward": "random"
+      },
+      "h_chase": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "none"
+      },
+      "h_outpost": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "none"
+      },
+      "h_paparazzi": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 80,
+        "reward": "none"
+      },
+      "h_collector": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "none"
+      },
+      "h_sweep": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 40,
+        "reward": "none"
+      }
+    },
+    "customQuests": [],
+    "adminGiftsEnabled": false
+  },
+  "self": {
+    "id": "4c8ad65a",
+    "name": "Hans",
+    "role": "hunter",
+    "caught": false,
+    "lastLocTs": null,
+    "points": 0,
+    "abilities": [
+      {
+        "key": "shield",
+        "count": 1
+      }
+    ],
+    "quests": [],
+    "inbox": [],
+    "frozenUntil": null,
+    "live": null,
+    "liveUntil": null,
+    "penalty": null,
+    "photoOrderDue": null,
+    "sendIntervalSec": 60,
+    "converted": false,
+    "cooldowns": [],
+    "spectatorDelaySec": 0
+  },
+  "players": [
+    {
+      "id": "666a8fcd",
+      "name": "Rita",
+      "role": "runner",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 1,
+      "lastPhotoTs": 1794036019592,
+      "points": 5,
+      "live": null,
+      "frozen": false,
+      "converted": false,
+      "avatar": 1794036019577
+    },
+    {
+      "id": "4c8ad65a",
+      "name": "Hans",
+      "role": "hunter",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": false,
+      "avatar": null
+    }
+  ],
+  "photos": [
+    {
+      "id": "9a7ef41b5357",
+      "pid": "666a8fcd",
+      "ts": 1794036019592,
+      "quest": null,
+      "questTitle": null,
+      "reactions": {
+        "🔥": 1
+      },
+      "myReaction": "🔥"
+    }
+  ],
+  "messages": [
+    {
+      "id": "675f94",
+      "ts": 1794036019585,
+      "text": "Rita ist als Runner beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "f8f4b6",
+      "ts": 1794036019588,
+      "text": "Hans ist als Hunter beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "4ad848",
+      "ts": 1794036019590,
+      "text": "Das Spiel läuft!",
+      "kind": "system"
+    }
+  ],
+  "effects": [],
+  "chat": [],
+  "pickups": []
+}

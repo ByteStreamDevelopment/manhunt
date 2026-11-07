@@ -29,6 +29,15 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.4
+
+* **Fotos im Vollbild** in der App (wischen, zoomen) und **Emoji-Reaktionen** auf Fotos (👍 ❤️ 😂 😮 🔥 👏 🤩 👎) – der Fotograf bekommt eine Meldung.
+* **Karten-Tab nur mit Karte:** Countdowns, Hinweise und die Entfernung zum nächsten Runner stehen im Aktionen-Tab; ein „!“ am Tab zeigt Wichtiges an.
+* **Spielverlauf:** Vergangene Runden im Profil antippen → Karte mit Wiederholung, Endstand, Fotos (mit Reaktionen) und ZIP-Download.
+* **Profilbild** hochladen (Website und App); erscheint im Profil, in der Bestenliste, bei Freunden und in der Spielerliste.
+* **Persönliche Galerie** („Meine Fotos“) mit allen eigenen Fotos und **Vitrine**: ausgewählte Fotos dauerhaft auf dem eigenen Profil ausstellen.
+* **Balance:** Fähigkeiten haben eine Seltenheit (häufig/selten/episch). Freeze und Radar sind episch (~4 %), kürzere Wirkdauer, viel längere Abklingzeiten, zum Start nur ein Schild, nur schwere Quests geben eine Fähigkeit, Pickups seltener (max. 3, alle 12 min). Gilt für neu angelegte Spiele.
+
 ## Neu in 2.3
 
 * **Chat für alle** zusätzlich zum Team-Chat (abschaltbar). Zuschauer lesen dort nur mit.

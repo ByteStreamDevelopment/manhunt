@@ -1,6 +1,14 @@
 package eu.nebendahl.manhunt
 
 import android.widget.Toast
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,7 +93,7 @@ fun FriendsWatcher(account: Account) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) -> Unit, joinGame: (String) -> Unit) {
+fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) -> Unit, joinGame: (String) -> Unit, openArchive: (String) -> Unit = {}) {
     BackHandler(onBack = onBack)
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -117,7 +125,14 @@ fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) ->
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(pr.username + if (pr.isAdmin) " 👑" else "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(pr.username, pr.avatar, 72.dp)
+                            Text(
+                                pr.username + if (pr.isAdmin) " 👑" else "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(start = 12.dp),
+                            )
+                        }
+                        if (pr.self) AvatarControls(pr) { reload++ }
                         Text((if (pr.online) "🟢 online · " else "") + "dabei seit ${df.format(Date(pr.createdAt))}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         val s = pr.stats
                         val cells = listOf("Punkte" to s["points"], "Spiele" to s["games"], "Siege" to s["wins"], "Fänge" to s["catches"],
@@ -144,6 +159,9 @@ fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) ->
                 }
             }
             if (pr.self) item { FriendsCard(openProfile, joinGame, ::friendAct) }
+            // Vitrine: ausgestellte Fotos (Issue #8)
+            if (pr.showcase.isNotEmpty() || pr.self) item { ShowcaseCard(pr) { reload++ } }
+            if (pr.self) item { MyPhotosCard { reload++ } }
             item {
                 val all = cat?.badges?.values?.toList() ?: emptyList()
                 Card(Modifier.fillMaxWidth()) {
@@ -183,7 +201,9 @@ fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) ->
             item { Text("🕘 Letzte Spiele", fontWeight = FontWeight.Bold) }
             if (pr.history.isEmpty()) item { Text("Noch keine Spiele.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(pr.history, key = { it.code + it.endedAt }) { h ->
-                Card(Modifier.fillMaxWidth()) {
+                // Issue #7: eigene, noch vorhandene Runden lassen sich öffnen
+                val canOpen = pr.self && h.available
+                Card(Modifier.fillMaxWidth().then(if (canOpen) Modifier.clickable { openArchive(h.code) } else Modifier)) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(h.name, fontWeight = FontWeight.Bold)
@@ -195,10 +215,179 @@ fun ProfileScreen(username: String, onBack: () -> Unit, openProfile: (String) ->
                             )
                         }
                         Text("${h.points} P", fontWeight = FontWeight.Bold)
+                        if (canOpen) Text("  ›", fontSize = 22.sp)
                     }
                 }
             }
         }
+    }
+}
+
+/* ---------------- Profilbild (Issue #7) ---------------- */
+
+@Composable
+private fun AvatarControls(pr: Profile, changed: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val account by GameRepository.account.collectAsState()
+    var busy by remember { mutableStateOf(false) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val a = account ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            try {
+                val jpeg = withContext(Dispatchers.Default) { squareJpeg(ctx, uri, 256) }
+                withContext(Dispatchers.IO) { Api.uploadAvatar(a.token, jpeg) }
+                Toast.makeText(ctx, "Profilbild gespeichert", Toast.LENGTH_SHORT).show()
+                changed()
+            } catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
+            catch (e: Exception) { Toast.makeText(ctx, "Bild konnte nicht verarbeitet werden", Toast.LENGTH_LONG).show() }
+            finally { busy = false }
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(
+            onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            enabled = !busy,
+        ) { Text(if (busy) "Lade hoch …" else if (pr.avatar != null) "🖼️ Profilbild ändern" else "🖼️ Profilbild wählen") }
+        if (pr.avatar != null) TextButton(onClick = {
+            val a = account ?: return@TextButton
+            scope.launch { runCatching { withContext(Dispatchers.IO) { Api.deleteAvatar(a.token) } }; changed() }
+        }) { Text("Entfernen") }
+    }
+}
+
+/* ---------------- Vitrine und eigene Fotos (Issue #8) ---------------- */
+
+@Composable
+private fun ShowcaseCard(pr: Profile, changed: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val account by GameRepository.account.collectAsState()
+    var open by remember { mutableStateOf<Int?>(null) }
+    var remove by remember { mutableStateOf<ShowcaseItem?>(null) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("🖼️ Vitrine", fontWeight = FontWeight.Bold)
+            if (pr.self && pr.showcase.isNotEmpty()) Text("Lange drücken zum Entfernen.", style = MaterialTheme.typography.bodySmall)
+            if (pr.showcase.isEmpty()) Text("Noch nichts ausgestellt. Wähle unten unter „Meine Fotos“ welche aus.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            pr.showcase.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { x ->
+                        val url = Api.showcaseUrl(x.id)
+                        val bmp = rememberImage(url, 512) { Api.bytes(url) }
+                        Box(
+                            Modifier.weight(1f).aspectRatio(1f).pointerInput(x.id) {
+                                detectTapGestures(onTap = { open = pr.showcase.indexOf(x) }, onLongPress = { if (pr.self) remove = x })
+                            },
+                        ) {
+                            if (bmp != null) Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            else CircularProgressIndicator(Modifier.align(Alignment.Center))
+                        }
+                    }
+                    repeat(3 - row.size) { Box(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+    open?.let { start ->
+        FullscreenPhotoViewer(
+            pr.showcase.map { x ->
+                val url = Api.showcaseUrl(x.id)
+                ViewerPhoto(url, x.caption.ifBlank { x.gameName }, x.gameName + " · " + df.format(Date(x.ts)), emptyMap(), null, false) { Api.bytes(url) }
+            },
+            start, onDismiss = { open = null },
+        )
+    }
+    remove?.let { x ->
+        AlertDialog(
+            onDismissRequest = { remove = null },
+            title = { Text(x.caption.ifBlank { x.gameName }) },
+            text = { Text("Aus der Vitrine entfernen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val a = account ?: return@TextButton
+                    remove = null
+                    scope.launch { runCatching { withContext(Dispatchers.IO) { Api.showcaseRemove(a.token, x.id) } }; changed() }
+                }) { Text("Entfernen") }
+            },
+            dismissButton = { TextButton(onClick = { remove = null }) { Text("Behalten") } },
+        )
+    }
+}
+
+@Composable
+private fun MyPhotosCard(changed: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val account by GameRepository.account.collectAsState()
+    var photos by remember { mutableStateOf<List<MyPhoto>?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
+    var open by remember { mutableStateOf<Int?>(null) }
+    var showcaseOf by remember { mutableStateOf<MyPhoto?>(null) }
+    LaunchedEffect(reload) { account?.let { a -> runCatching { photos = withContext(Dispatchers.IO) { Api.myPhotos(a.token) } } } }
+    val list = photos ?: emptyList()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("📸 Meine Fotos (${list.size})", fontWeight = FontWeight.Bold)
+            Text("Alle deine Fotos aus Spielen, die noch auf dem Server liegen. Antippen für Vollbild, lange drücken zum Ausstellen.", style = MaterialTheme.typography.bodySmall)
+            if (photos == null) CircularProgressIndicator()
+            list.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { x ->
+                        val a = account
+                        val bmp = if (a != null) rememberImage("${x.code}:${x.id}", 512) { Api.photoBytes(x.code, a.token, x.id) } else null
+                        Box(
+                            Modifier.weight(1f).aspectRatio(1f).pointerInput(x.id) {
+                                detectTapGestures(onTap = { open = list.indexOf(x) }, onLongPress = { if (!x.showcased) showcaseOf = x })
+                            },
+                        ) {
+                            if (bmp != null) Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            else CircularProgressIndicator(Modifier.align(Alignment.Center))
+                            if (x.showcased) Text("🖼️", Modifier.align(Alignment.TopEnd).padding(2.dp))
+                            if (x.reactions.isNotEmpty()) Text(
+                                reactionText(x.reactions),
+                                Modifier.align(Alignment.BottomStart).background(Color(0x99000000)).padding(2.dp),
+                                color = Color.White, style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                    repeat(3 - row.size) { Box(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+    open?.let { start ->
+        val a = account ?: return@let
+        FullscreenPhotoViewer(
+            list.map { x ->
+                ViewerPhoto("${x.code}:${x.id}", x.gameName, df.format(Date(x.ts)) + (x.questTitle?.let { " · 📜 $it" } ?: ""), x.reactions, null, false) {
+                    Api.photoBytes(x.code, a.token, x.id)
+                }
+            },
+            start, onDismiss = { open = null },
+        )
+    }
+    showcaseOf?.let { x ->
+        var caption by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showcaseOf = null },
+            title = { Text("🖼️ Auf dem Profil ausstellen") },
+            text = { OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("Bildunterschrift (optional)") }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val a = account ?: return@TextButton
+                    showcaseOf = null
+                    scope.launch {
+                        try { withContext(Dispatchers.IO) { Api.showcaseAdd(a.token, x.code, x.id, caption) }; reload++; changed() }
+                        catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
+                    }
+                }) { Text("Ausstellen") }
+            },
+            dismissButton = { TextButton(onClick = { showcaseOf = null }) { Text("Abbrechen") } },
+        )
     }
 }
 
@@ -233,6 +422,7 @@ private fun FriendsCard(openProfile: (String) -> Unit, joinGame: (String) -> Uni
             fr?.friends?.forEach { x ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (x.online) "🟢" else "⚪", Modifier.width(28.dp))
+                    Avatar(x.username, x.avatar, 28.dp)
                     TextButton(onClick = { openProfile(x.username) }) { Text(x.username, fontWeight = FontWeight.Bold) }
                     Text(
                         if (x.online) "online" else x.lastSeen?.let { "zuletzt ${df.format(Date(it))}" } ?: "",

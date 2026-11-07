@@ -192,6 +192,37 @@ object Api {
     /** Download-Adresse aller Fotos als ZIP (nach Spielende; Spielleitung jederzeit). */
     fun photosZipUrl(code: String, token: String): String = url("/api/g/$code/photos.zip?t=" + URLEncoder.encode(token, "UTF-8"))
 
+    /* ---------------- Reaktionen, Profilbild, Galerie (Issues #6–#8) ---------------- */
+
+    /** Reaktion setzen; gleiches Emoji nochmal = entfernen. Gibt die eigene Reaktion danach zurück. */
+    fun react(code: String, token: String, photoId: String, emoji: String): String? =
+        json(post("/api/g/$code/photo/$photoId/react", token, JSONObject().put("emoji", emoji))).let { if (it.isNull("reaction")) null else it.optString("reaction") }
+
+    fun avatarUrl(username: String, version: Long) = url("/api/avatar/" + URLEncoder.encode(username, "UTF-8").replace("+", "%20") + "?v=$version")
+
+    fun showcaseUrl(id: String) = url("/api/showcase/$id.jpg")
+
+    fun bytes(fullUrl: String): ByteArray = call(Request.Builder().url(fullUrl).build())
+
+    fun uploadAvatar(accountToken: String, jpeg: ByteArray) {
+        call(Request.Builder().url(url("/api/me/avatar")).header("x-account", accountToken).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
+    }
+
+    fun deleteAvatar(accountToken: String) {
+        call(Request.Builder().url(url("/api/me/avatar")).header("x-account", accountToken).delete().build())
+    }
+
+    fun myPhotos(accountToken: String): List<MyPhoto> =
+        parseMyPhotos(json(Request.Builder().url(url("/api/me/photos")).header("x-account", accountToken).build()))
+
+    fun showcaseAdd(accountToken: String, code: String, photoId: String, caption: String) {
+        json(post("/api/me/showcase", null, JSONObject().put("code", code).put("photoId", photoId).put("caption", caption), account = accountToken))
+    }
+
+    fun showcaseRemove(accountToken: String, id: String) {
+        call(Request.Builder().url(url("/api/me/showcase/$id")).header("x-account", accountToken).delete().build())
+    }
+
     fun voiceBytes(code: String, token: String, id: String): ByteArray = call(get("/api/g/$code/chat/voice/$id", token))
 
     /* ---------------- Spielleitung (mit dem Token eines Admin-Accounts) ---------------- */
