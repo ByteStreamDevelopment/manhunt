@@ -266,7 +266,10 @@ fun HomeScreen(
             Text("Manhunt", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             TextButton(onClick = { GameRepository.logout() }) { Text("Abmelden") }
         }
-        Text("Angemeldet als ${account.username}" + if (account.isAdmin) " 👑" else "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "Angemeldet als ${account.username}" + (if (account.isAdmin) " 👑" else "") + " · App ${BuildConfig.VERSION_NAME}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = openLeaderboard, modifier = Modifier.weight(1f)) { Text("🏆 Bestenliste") }

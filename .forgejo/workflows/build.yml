@@ -20,6 +20,8 @@ jobs:
           apt-get install -y nodejs
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # für die Änderungsliste seit dem letzten Tag
 
       - name: Android SDK einrichten
         run: |
@@ -32,17 +34,51 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
+      # Fester Signierschlüssel (Issue #5): Ohne ihn signiert jeder Build mit einem neuen Zufallsschlüssel,
+      # und Android verweigert jedes Update ("App nicht installiert").
+      # Secrets: MANHUNT_KEYSTORE_BASE64 = base64 -w0 android/keystore/manhunt.jks, MANHUNT_KEYSTORE_PASSWORD
+      - name: Signierschlüssel bereitstellen
+        working-directory: android
+        env:
+          KS_B64: ${{ secrets.MANHUNT_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.MANHUNT_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            mkdir -p keystore
+            echo "$KS_B64" | base64 -d > keystore/manhunt.jks
+            printf 'storeFile=keystore/manhunt.jks\nstorePassword=%s\nkeyAlias=manhunt\nkeyPassword=%s\n' "$KS_PASS" "$KS_PASS" > keystore.properties
+            echo "VARIANT=release" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Kein Signierschlüssel (Secret MANHUNT_KEYSTORE_BASE64) – Updates über eine installierte App schlagen fehl!"
+            echo "VARIANT=debug" >> "$GITHUB_ENV"
+          fi
+
+      # Bei einem Tag v2.3.4: versionName 2.3.4, versionCode 2030004 (immer steigend)
+      - name: Version aus dem Tag
+        run: |
+          REF="${{ github.ref }}"
+          if [ "${REF#refs/tags/v}" != "$REF" ]; then
+            V="${REF#refs/tags/v}"
+            IFS=. read -r MA MI PA <<< "$V"
+            CODE=$(( ${MA:-0} * 1000000 + ${MI:-0} * 10000 + ${PA:-0} ))
+            echo "VERSION_NAME=$V" >> "$GITHUB_ENV"
+            echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+            echo "Version $V ($CODE)"
+          fi
+
       - name: APK bauen
         working-directory: android
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon assembleDebug
+          if [ "$VARIANT" = "release" ]; then TASK=assembleRelease; else TASK=assembleDebug; fi
+          ./gradlew --no-daemon $TASK ${VERSION_NAME:+-PversionName=$VERSION_NAME -PversionCode=$VERSION_CODE}
+          cp app/build/outputs/apk/$VARIANT/app-$VARIANT.apk ../manhunt.apk
 
       - name: APK als Artefakt speichern
         uses: actions/upload-artifact@v3
         with:
           name: manhunt-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: manhunt.apk
 
       - name: Release erstellen und APK anhängen
         if: startsWith(github.ref, 'refs/tags/v')
@@ -51,10 +87,14 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           API="${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
+          # Änderungen seit dem vorherigen Tag als Release-Notizen (zeigt die App im Update-Dialog)
+          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then NOTES=$(git log --no-merges --pretty='- %s' "$PREV..$TAG" | head -n 30); else NOTES="Erste automatische Version."; fi
+          BODY=$(jq -n --arg t "$TAG" --arg b "$NOTES" '{tag_name: $t, name: $t, body: $b}')
           RELEASE_ID=$(curl -fsS -X POST "$API/releases" \
             -H "Authorization: token $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" | jq -r .id)
+            -d "$BODY" | jq -r .id)
           curl -fsS -X POST "$API/releases/$RELEASE_ID/assets?name=manhunt-$TAG.apk" \
             -H "Authorization: token $TOKEN" \
-            -F "attachment=@android/app/build/outputs/apk/debug/app-debug.apk"
+            -F "attachment=@manhunt.apk"

@@ -131,6 +131,7 @@ fun App(inviteCode: String?) {
     val s = session
     val a = account
     a?.let { FriendsWatcher(it) }
+    UpdateChecker()
     val openProfile: (String) -> Unit = { profileOf = it; screen = "profile" }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {

@@ -1,0 +1,68 @@
+# Issue #5: Bei jedem Push auf main, der App oder Server ändert, einen neuen Versions-Tag setzen.
+# Forgejo (git.nebendahl.eu) spiegelt das Repository samt Tags; der Forgejo-Workflow baut dann die APK
+# und hängt sie als Release an. Die App prüft beim Öffnen auf neue Releases.
+#
+# Tag-Schema: v<major>.<minor>.<n>  – major.minor kommt aus android/app/build.gradle.kts (versionName),
+# n zählt automatisch hoch. Für einen Sprung (z. B. 2.4) einfach versionName dort ändern.
+# Kein Tag: "[skip tag]" in die Commit-Nachricht schreiben.
+#
+# Optional: Secret FORGEJO_TOKEN (Forgejo-Token mit Schreibrecht auf Manhunt/manhunt) -> Forgejo
+# synchronisiert sofort statt erst beim nächsten Spiegel-Intervall (dort derzeit 8 Stunden).
+name: Auto-Tag
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', 'server/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip tag]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Nächsten Tag bestimmen und setzen
+        id: tag
+        run: |
+          set -euo pipefail
+          if git tag --points-at HEAD | grep -q '^v'; then
+            echo "Dieser Commit hat schon einen Tag – nichts zu tun."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BASE=$(grep 'versionName =' android/app/build.gradle.kts | grep -oE '"[0-9]+\.[0-9]+"' | head -n1 | tr -d '"')
+          if [ -z "$BASE" ]; then echo "versionName (major.minor) nicht gefunden"; exit 1; fi
+          LAST=$(git tag -l "v$BASE.*" | sed "s/^v$BASE\.//" | grep -E '^[0-9]+$' | sort -n | tail -n1 || true)
+          NEXT=$(( ${LAST:--1} + 1 ))
+          TAG="v$BASE.$NEXT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$(git log -1 --pretty=%s)"
+          git push origin "$TAG"
+          echo "Neuer Tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Forgejo sofort synchronisieren
+        if: steps.tag.outputs.tag != ''
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          if [ -z "$FORGEJO_TOKEN" ]; then
+            echo "Kein FORGEJO_TOKEN – Forgejo holt den Tag beim nächsten Spiegel-Intervall."
+            exit 0
+          fi
+          curl -fsS -X POST -H "Authorization: token $FORGEJO_TOKEN" \
+            https://git.nebendahl.eu/api/v1/repos/Manhunt/manhunt/mirror-sync \
+            && echo "Forgejo-Synchronisation angestoßen." \
+            || echo "::warning::Forgejo-Synchronisation fehlgeschlagen (Token/Rechte prüfen)."

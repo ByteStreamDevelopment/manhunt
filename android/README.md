@@ -74,6 +74,34 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
 - `Models`           Datenmodell + Spiellogik (Foto-Runden, wer teilt), mit Unit-Tests gegen echte Server-Antworten
 - `Ui` / `MapTab`    Compose-Oberfläche, OpenStreetMap über osmdroid (kein API-Key nötig)
 
+## Automatische Updates (Issue #5)
+
+Ablauf: Push auf GitHub `main` (Änderung in `android/` oder `server/`) → GitHub-Workflow `.github/workflows/auto-tag.yml`
+setzt den nächsten Tag `v<major>.<minor>.<n>` → Forgejo spiegelt Repo und Tag → Forgejo-Workflow
+`.forgejo/workflows/build.yml` baut die APK mit dieser Version und hängt sie als Release an →
+die App fragt **bei jedem Öffnen** `git.nebendahl.eu/api/v1/repos/Manhunt/manhunt/releases/latest` ab und bietet
+„Jetzt aktualisieren“ an (Download mit Fortschritt, dann Android-Installer).
+
+- `major.minor` steht in `app/build.gradle.kts` (`versionName`), die letzte Zahl zählt automatisch hoch.
+  Kein neuer Tag: `[skip tag]` in die Commit-Nachricht.
+- Beim ersten Update fragt Android, ob Manhunt Apps installieren darf – einmal erlauben.
+
+**Einmalig einrichten:**
+
+1. **Signierschlüssel (wichtig!)** – sonst signiert jeder CI-Build mit einem neuen Zufallsschlüssel und Android
+   lehnt jedes Update ab („App nicht installiert“). Schlüssel einmal erzeugen (z. B. mit `./build.sh`, liegt dann in
+   `android/keystore/manhunt.jks`, Passwort in `android/keystore.properties`) und in **Forgejo** →
+   Manhunt/manhunt → Einstellungen → Actions → Secrets anlegen:
+   - `MANHUNT_KEYSTORE_BASE64` = Ausgabe von `base64 -w0 android/keystore/manhunt.jks`
+   - `MANHUNT_KEYSTORE_PASSWORD` = das `storePassword`
+
+   Wer schon eine APK mit einem anderen Schlüssel installiert hat, muss **einmal** deinstallieren und neu installieren
+   (die App erkennt das und sagt es im Update-Dialog). Account und Punkte liegen auf dem Server und bleiben erhalten.
+2. **Optional, damit Updates sofort kommen:** Forgejo spiegelt GitHub nur alle 8 Stunden. Mit einem Forgejo-Token
+   (Schreibrecht auf Manhunt/manhunt) als **GitHub**-Secret `FORGEJO_TOKEN` stößt der Auto-Tag-Workflow die
+   Synchronisation sofort an.
+3. `RELEASE_TOKEN` (Forgejo-Secret zum Anlegen der Releases) ist schon eingerichtet.
+
 ## Forgejo
 Der Workflow `.forgejo/workflows/build.yml` testet und baut bei jedem Push auf `main` (und manuell über „Actions“)
 die APK und hängt sie als Artefakt `manhunt-apk` an den Lauf. Voraussetzung ist ein aktiver Forgejo-Runner mit

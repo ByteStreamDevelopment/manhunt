@@ -15,10 +15,14 @@ android {
         applicationId = "eu.nebendahl.manhunt"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.3"
+        // Beim Release-Build setzt der Forgejo-Workflow beides aus dem Git-Tag (z. B. v2.3.4 -> 2.3.4 / 2030004).
+        // Lokal gilt der Grundwert; der automatische Tag auf GitHub nimmt "major.minor" von hier.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2030000
+        versionName = (project.findProperty("versionName") as String?) ?: "2.3"
         // Server-Adresse der Manhunt-Website
         buildConfigField("String", "BASE_URL", "\"https://manhunt.nebendahl.eu\"")
+        // Hier fragt die App beim Öffnen nach einer neueren Version (Forgejo-Releases, öffentlich)
+        buildConfigField("String", "UPDATE_URL", "\"https://git.nebendahl.eu/api/v1/repos/Manhunt/manhunt/releases/latest\"")
     }
 
     // Fester Signierschlüssel, damit neue APKs über alte installiert werden können.
