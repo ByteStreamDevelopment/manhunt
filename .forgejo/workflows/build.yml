@@ -11,9 +11,6 @@ jobs:
     runs-on: docker
     container:
       image: gradle:8.9-jdk17
-    defaults:
-      run:
-        working-directory: android
     steps:
       - name: Node 20, git und jq installieren
         run: |
@@ -36,6 +33,7 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: APK bauen
+        working-directory: android
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon assembleDebug
@@ -59,4 +57,4 @@ jobs:
             -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\"}" | jq -r .id)
           curl -fsS -X POST "$API/releases/$RELEASE_ID/assets?name=manhunt-$TAG.apk" \
             -H "Authorization: token $TOKEN" \
-            -F "attachment=@app/build/outputs/apk/debug/app-debug.apk"
+            -F "attachment=@android/app/build/outputs/apk/debug/app-debug.apk"
