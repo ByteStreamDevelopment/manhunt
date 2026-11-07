@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -214,8 +215,12 @@ fun AuthScreen() {
 @Composable
 fun HomeScreen(
     account: Account, inviteCode: String?, openLeaderboard: () -> Unit, openGallery: () -> Unit, openAdmin: () -> Unit, openProfile: () -> Unit,
+    openSettings: () -> Unit = {},
 ) {
     val friends by GameRepository.friends.collectAsState()
+    // Eigenes Profilbild (Version) einmal laden
+    var myAvatar by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(account.username) { runCatching { myAvatar = withContext(Dispatchers.IO) { Api.profile(account.username, account.token) }.avatar } }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var code by rememberSaveable(inviteCode) { mutableStateOf(inviteCode.orEmpty()) }
@@ -262,26 +267,18 @@ fun HomeScreen(
         Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // Kopf: Profilbild, Begrüßung, Einstellungen (Issue #10)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Manhunt", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            TextButton(onClick = { GameRepository.logout() }) { Text("Abmelden") }
+            Box(Modifier.clickable { openProfile() }) { Avatar(account.username, myAvatar, 52.dp) }
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text("Hallo, ${account.username}" + if (account.isAdmin) " 👑" else "", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Manhunt ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            TextButton(onClick = openSettings) { Text("⚙️", fontSize = 26.sp) }
         }
-        Text(
-            "Angemeldet als ${account.username}" + (if (account.isAdmin) " 👑" else "") + " · App ${BuildConfig.VERSION_NAME}",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = openLeaderboard, modifier = Modifier.weight(1f)) { Text("🏆 Bestenliste") }
-            OutlinedButton(onClick = openGallery, modifier = Modifier.weight(1f)) { Text("⭐ Galerie") }
-        }
-        val requests = friends?.incoming?.size ?: 0
-        OutlinedButton(onClick = openProfile, modifier = Modifier.fillMaxWidth()) {
-            Text("👤 Profil & Freunde" + if (requests > 0) " ($requests neue Anfrage${if (requests > 1) "n" else ""})" else "")
-        }
-        if (account.isAdmin) Button(onClick = openAdmin, modifier = Modifier.fillMaxWidth()) { Text("👑 Spielleitung") }
         friends?.invites?.forEach { inv ->
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF3A3410))) {
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("🎮 ${inv.gameName}", fontWeight = FontWeight.Bold)
@@ -291,6 +288,7 @@ fun HomeScreen(
                 }
             }
         }
+        Text("Spiel beitreten", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
 
         OutlinedTextField(
             value = code,
@@ -357,6 +355,27 @@ fun HomeScreen(
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
             if (it.contains("App-Einstellungen") || it.contains("GENAUEN")) OutlinedButton(onClick = { openAppSettings(ctx) }) { Text("App-Einstellungen öffnen") }
+        }
+        // Weitere Bereiche als Kacheln
+        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        val requests = friends?.incoming?.size ?: 0
+        val tiles = buildList {
+            add(Triple("🏆", "Bestenliste", openLeaderboard))
+            add(Triple("⭐", "Galerie", openGallery))
+            add(Triple("👤", "Profil & Freunde" + if (requests > 0) " ($requests)" else "", openProfile))
+            if (account.isAdmin) add(Triple("👑", "Spielleitung", openAdmin)) else add(Triple("⚙️", "Einstellungen", openSettings))
+        }
+        tiles.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { (icon, label, action) ->
+                    Card(Modifier.weight(1f).clickable { action() }) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(icon, fontSize = 30.sp)
+                            Text(label, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
         }
     }
 }

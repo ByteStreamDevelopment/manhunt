@@ -147,7 +147,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
         // Aktive Effekte
         if (st.effects.isNotEmpty()) {
             item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF3A3410))) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Aktive Effekte", fontWeight = FontWeight.Bold)
                         st.effects.forEach { e ->
@@ -219,7 +219,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                     Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
                         containerColor = when (q.status) {
-                            "done" -> Color(0xFF1E4A2E); "failed" -> MaterialTheme.colorScheme.surfaceVariant; else -> MaterialTheme.colorScheme.surface
+                            "done" -> MaterialTheme.colorScheme.tertiaryContainer; "failed" -> MaterialTheme.colorScheme.surfaceVariant; else -> MaterialTheme.colorScheme.surface
                         },
                     ),
                 ) {

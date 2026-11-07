@@ -99,8 +99,34 @@ private val C_WARN = Color(0xFFF2BC0F)
 
 @Composable
 fun MhTheme(content: @Composable () -> Unit) {
+    // Design aus den Einstellungen: system | dark | light (Issue #10)
+    val choice by AppSettings.theme.collectAsState()
+    val dark = when (choice) { "dark" -> true; "light" -> false; else -> androidx.compose.foundation.isSystemInDarkTheme() }
     MaterialTheme(
-        colorScheme = darkColorScheme(
+        colorScheme = if (!dark) androidx.compose.material3.lightColorScheme(
+            primary = Color(0xFF1E8A4F),
+            onPrimary = Color.White,
+            secondary = Color(0xFF9A7400),
+            onSecondary = Color.White,
+            secondaryContainer = Color(0xFFFBEFC0),
+            onSecondaryContainer = Color(0xFF2A2000),
+            tertiaryContainer = Color(0xFFCFE9D8),
+            onTertiaryContainer = Color(0xFF06210F),
+            background = Color(0xFFF2F6F0),
+            surface = Color.White,
+            surfaceVariant = Color(0xFFE2EBE4),
+            surfaceContainer = Color(0xFFF7FAF6),
+            onBackground = Color(0xFF14201A),
+            onSurface = Color(0xFF14201A),
+            onSurfaceVariant = Color(0xFF4B5B50),
+            error = Color(0xFFC7301F),
+            errorContainer = Color(0xFFF3D2CC),
+            onErrorContainer = Color(0xFF410002),
+        ) else darkColorScheme(
+            secondaryContainer = Color(0xFF4A3D0A),
+            onSecondaryContainer = Color(0xFFFBEFC0),
+            tertiaryContainer = Color(0xFF1E4A2E),
+            onTertiaryContainer = Color(0xFFCFE9D8),
             primary = Color(0xFF5BD68A),
             onPrimary = Color(0xFF06210F),
             secondary = Color(0xFFF2BC0F),
@@ -144,12 +170,13 @@ fun App(inviteCode: String?) {
             screen == "archive" && archiveCode != null && a != null -> ArchiveGameScreen(a, archiveCode!!) { screen = "profile" }
             screen == "leaderboard" -> LeaderboardScreen(onBack = { screen = "main" }, openProfile = openProfile)
             screen == "gallery" -> GalleryScreen { screen = "main" }
+            screen == "settings" -> SettingsScreen(onBack = { screen = "main" }, openProfile = { a?.let { openProfile(it.username) } })
             screen == "admin" && a != null -> AdminScreen(a) { screen = "main" }
             s != null -> GameScreen(openLeaderboard = { screen = "leaderboard" })
             a == null -> AuthScreen()
             else -> HomeScreen(
                 a, pendingCode ?: inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" },
-                openAdmin = { screen = "admin" }, openProfile = { openProfile(a.username) },
+                openAdmin = { screen = "admin" }, openProfile = { openProfile(a.username) }, openSettings = { screen = "settings" },
             )
         }
     }
@@ -214,7 +241,7 @@ private enum class BannerKind { Info, Warn, Error }
 private fun Banner(text: String, kind: BannerKind = BannerKind.Info, action: String? = null, onAction: () -> Unit = {}) {
     val bg = when (kind) {
         BannerKind.Info -> MaterialTheme.colorScheme.surfaceVariant
-        BannerKind.Warn -> Color(0xFF4A3D0A)
+        BannerKind.Warn -> MaterialTheme.colorScheme.secondaryContainer
         BannerKind.Error -> MaterialTheme.colorScheme.errorContainer
     }
     Surface(color = bg, modifier = Modifier.fillMaxWidth()) {
@@ -264,6 +291,14 @@ fun GameScreen(openLeaderboard: () -> Unit) {
     LaunchedEffect(Unit) { GameRepository.toasts.collect { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }
     val shooter = rememberPhotoShooter()
     val activeQuests = g?.self?.quests?.count { it.status == "active" } ?: 0
+    // Einstellung „Bildschirm anlassen“ (Issue #10): nur solange das Spiel läuft
+    val keepOn by AppSettings.keepScreenOn.collectAsState()
+    val view = androidx.compose.ui.platform.LocalView.current
+    val running = g?.game?.status == "running"
+    DisposableEffect(keepOn, running) {
+        view.keepScreenOn = keepOn && running
+        onDispose { view.keepScreenOn = false }
+    }
     // Wichtiger Hinweis im Aktionen-Tab? Dann zeigt das Tab-Symbol ein „!“
     val lastPhotoLocal by GameRepository.localLastPhoto.collectAsState()
     val alert = g != null && g.game.status == "running" && g.isPlayer() && (

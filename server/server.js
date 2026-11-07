@@ -1453,6 +1453,36 @@ async function handleMe(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
   if (p === '/api/me/photos' && m === 'GET') return sendJSON(res, 200, { photos: myPhotos(a) });
+  // Konto selbst löschen (Datenschutz): Passwort zur Bestätigung. Admin-Konten nur über den Server.
+  if (p === '/api/me/delete' && m === 'POST') {
+    rateLimit(req, 'delete', 10, 3600e3);
+    const b = await readJSON(req);
+    if (!safeEq(a.hash, hashPassword(b.password || '', a.salt))) throw new HttpError(401, 'Falsches Passwort');
+    if (isAdminAccount(a)) throw new HttpError(409, 'Admin-Konten können nicht in der App gelöscht werden');
+    await fsp.unlink(path.join(AVATAR_DIR, `${a.id}.jpg`)).catch(() => {});
+    for (const x of a.showcase || []) await fsp.unlink(path.join(SHOWCASE_DIR, `${x.id}.jpg`)).catch(() => {});
+    // Freundschaften und Einladungen bei anderen entfernen
+    for (const o of Object.values(db.accounts)) {
+      for (const k of ['friends', 'friendIn', 'friendOut']) if (o[k]) o[k] = o[k].filter((id) => id !== a.id);
+      if (o.invites) o.invites = o.invites.filter((i) => i.from !== a.id);
+    }
+    // In Spielen bleibt der Spielername stehen, die Verbindung zum Konto wird getrennt
+    for (const g of Object.values(db.games)) for (const pl of Object.values(g.players)) if (pl.accountId === a.id) pl.accountId = null;
+    // Galerie-Einträge bleiben (von der Spielleitung ausgewählt), aber ohne Kontoverknüpfung
+    for (const x of db.gallery) if (x.accountId === a.id) x.accountId = null;
+    delete db.accounts[a.id];
+    save();
+    return sendJSON(res, 200, { ok: true });
+  }
+  // Passwort ändern (eingeloggt, mit altem Passwort)
+  if (p === '/api/me/password' && m === 'POST') {
+    rateLimit(req, 'pwchange', 10, 3600e3);
+    const b = await readJSON(req);
+    if (!safeEq(a.hash, hashPassword(b.oldPassword || '', a.salt))) throw new HttpError(401, 'Das bisherige Passwort stimmt nicht');
+    if (String(b.newPassword || '').length < 8) throw new HttpError(400, 'Das neue Passwort muss mindestens 8 Zeichen haben');
+    a.salt = rid(16); a.hash = hashPassword(b.newPassword, a.salt); a.tokenVersion = (a.tokenVersion || 0) + 1; save();
+    return sendJSON(res, 200, loginResponse(a)); // neues Token, alte Anmeldungen auf anderen Geräten werden ungültig
+  }
   if (p === '/api/me/showcase' && m === 'POST') {
     const b = await readJSON(req);
     const g = db.games[String(b.code || '').toUpperCase()];

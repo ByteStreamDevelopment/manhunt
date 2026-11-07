@@ -29,6 +29,11 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.5
+
+* Spieler können ihr **Passwort ändern** (`POST /api/me/password`, meldet andere Geräte ab) und ihr **Konto selbst löschen** (`POST /api/me/delete`, mit Passwort): Profilbild, Vitrine, Freundschaften und Statistik werden entfernt, in alten Spielen bleibt nur der Name. Admin-Konten lassen sich so nicht löschen.
+* App: Einstellungen und neuer Startbildschirm (siehe `android/README.md`).
+
 ## Neu in 2.4
 
 * **Fotos im Vollbild** in der App (wischen, zoomen) und **Emoji-Reaktionen** auf Fotos (👍 ❤️ 😂 😮 🔥 👏 🤩 👎) – der Fotograf bekommt eine Meldung.

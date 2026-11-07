@@ -73,7 +73,8 @@ fun prepareJpeg(ctx: Context, uri: Uri): ByteArray {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2000) sample *= 2
+    val (maxSide, quality) = AppSettings.photoSpec()
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
     val bmp = ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, opts) }
         ?: throw IllegalStateException("Foto nicht lesbar")
@@ -90,7 +91,7 @@ fun prepareJpeg(ctx: Context, uri: Uri): ByteArray {
         Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(deg) }, true)
     } else bmp
     val bos = ByteArrayOutputStream()
-    out.compress(Bitmap.CompressFormat.JPEG, 82, bos)
+    out.compress(Bitmap.CompressFormat.JPEG, quality, bos)
     return bos.toByteArray()
 }
 

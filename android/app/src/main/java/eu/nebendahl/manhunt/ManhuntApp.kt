@@ -7,6 +7,7 @@ import java.io.File
 class ManhuntApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        AppSettings.init(this)
         GameRepository.init(this)
         // Anti-Cheat: aktives VPN wird dem Server per Header gemeldet
         val cm = getSystemService(android.net.ConnectivityManager::class.java)

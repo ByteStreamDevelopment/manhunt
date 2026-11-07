@@ -26,6 +26,8 @@ data class AppRelease(val version: String, val tag: String, val notes: String, v
 object Updater {
     /** Gefundenes neueres Release (null = aktuell oder noch nicht geprüft) */
     val available = MutableStateFlow<AppRelease?>(null)
+    /** Version, für die „Später“ gewählt wurde (bis zum nächsten Öffnen oder einer Suche in den Einstellungen) */
+    val dismissed = MutableStateFlow<String?>(null)
     /** Download-Fortschritt 0..1, null = kein Download */
     val progress = MutableStateFlow<Float?>(null)
     @Volatile private var lastCheck = 0L
@@ -64,9 +66,10 @@ object Updater {
     }
 
     /** Fragt Forgejo nach dem neuesten Release. Höchstens alle 10 Minuten; Fehler (offline) werden ignoriert. */
-    suspend fun check(force: Boolean = false) {
+    /** Gibt true zurück, wenn die Prüfung geklappt hat (für „Jetzt suchen“ in den Einstellungen). */
+    suspend fun check(force: Boolean = false): Boolean {
         val now = System.currentTimeMillis()
-        if (!force && now - lastCheck < 10 * 60_000) return
+        if (!force && (!AppSettings.autoUpdateCheck.value || now - lastCheck < 10 * 60_000)) return false
         lastCheck = now
         val rel = withContext(Dispatchers.IO) {
             runCatching {
@@ -74,9 +77,14 @@ object Updater {
                     if (!r.isSuccessful) null else parseRelease(JSONObject(r.body!!.string()))
                 }
             }.getOrNull()
-        } ?: return
+        } ?: return false
         available.value = if (rel.apkUrl != null && isNewer(rel.version, BuildConfig.VERSION_NAME)) rel else null
+        latest.value = rel
+        return true
     }
+
+    /** Zuletzt gefundenes Release (auch wenn es nicht neuer ist) – für die Anzeige in den Einstellungen */
+    val latest = MutableStateFlow<AppRelease?>(null)
 
     /** Darf diese App Installationen starten? Sonst muss man es einmal in den Einstellungen erlauben. */
     fun canInstall(ctx: Context) = Build.VERSION.SDK_INT < 26 || ctx.packageManager.canRequestPackageInstalls()

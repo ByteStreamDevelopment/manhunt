@@ -400,7 +400,7 @@ private fun FriendsCard(openProfile: (String) -> Unit, joinGame: (String) -> Uni
             val fr = f
             Text("👥 Freunde (${fr?.friends?.size ?: 0})", fontWeight = FontWeight.Bold)
             fr?.invites?.forEach { i ->
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3A3410))) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("🎮 ${i.gameName}", fontWeight = FontWeight.Bold)

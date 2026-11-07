@@ -70,7 +70,7 @@ fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, useMyGps: Boolean =
     val fix = if (useMyGps) liveFix else null
     val mapView = remember {
         MapView(ctx).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(if (AppSettings.mapStyle.value == "topo") TileSourceFactory.OpenTopo else TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)

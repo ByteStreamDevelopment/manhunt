@@ -76,6 +76,7 @@ class TrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        AppSettings.init(this)
         GameRepository.init(this)
         Notif.createChannels(this)
         fused = LocationServices.getFusedLocationProviderClient(this)
@@ -148,7 +149,7 @@ class TrackingService : Service() {
                 val send = st.self.sendIntervalSec * 1000L
                 val interval = when {
                     st.self.live != null -> maxOf(2_000L, send)
-                    GameRepository.stationary.value -> maxOf(15_000L, minOf(send, 60_000L))
+                    AppSettings.gpsSaver.value && GameRepository.stationary.value -> maxOf(15_000L, minOf(send, 60_000L))
                     else -> minOf(send, 10_000L)
                 }
                 ensureLocation(interval)

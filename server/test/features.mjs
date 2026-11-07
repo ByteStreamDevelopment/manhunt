@@ -331,6 +331,24 @@ ok(resp.status === 200, 'Vitrine bleibt, auch wenn Spielfotos gelöscht werden')
 r = await api(`/api/me/showcase/${pr.showcase[0].id}`, { method: 'DELETE', acc: A.Rita.token });
 ok(r.showcase.length === 0, 'Aus der Vitrine entfernt');
 
+console.log('Konto: Passwort ändern, löschen (Issue #10)');
+const tmp = await account('Tim');
+r = await api('/api/me/password', { acc: tmp.token, body: { oldPassword: 'falsch', newPassword: 'neuesPasswort' } });
+ok(r.http === 401, 'Passwort ändern mit falschem alten Passwort abgelehnt');
+r = await api('/api/me/password', { acc: tmp.token, body: { oldPassword: 'geheim123', newPassword: 'neuesPasswort' } });
+ok(r.token && r.token !== tmp.token, 'Passwort geändert, neues Token');
+ok((await api('/api/auth/me', { acc: tmp.token })).http === 401, 'Altes Token ist danach ungültig');
+await api('/api/friends/request', { acc: r.token, body: { username: 'Hans' } });
+r = await api('/api/me/delete', { acc: r.token, body: { password: 'falsch' } });
+ok(r.http === 401, 'Löschen nur mit richtigem Passwort');
+const tmpLogin = await api('/api/auth/login', { body: { login: 'Tim', password: 'neuesPasswort' } });
+r = await api('/api/me/delete', { acc: tmpLogin.token, body: { password: 'neuesPasswort' } });
+ok(r.ok, 'Konto gelöscht');
+ok((await api('/api/profile/Tim')).http === 404, 'Profil ist weg');
+ok(!(await api('/api/friends', { acc: A.Hans.token })).incoming.some((x) => x.username === 'Tim'), 'Freundschaftsanfrage bei anderen entfernt');
+r = await api('/api/me/delete', { acc: admin.token, body: { password: 'geheim123' } });
+ok(r.http === 409, 'Admin-Konten lassen sich nicht in der App löschen');
+
 console.log('IP hinter Proxy');
 await stop(); await start({ TRUST_PROXY: 'never' }); // wie ein direkt aus dem Internet erreichbarer Server
 for (let i = 0; i < 6; i++) await api('/api/admin/login', { body: { password: 'falsch' }, headers: { 'x-forwarded-for': `1.2.3.${i}` } });

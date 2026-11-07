@@ -39,6 +39,10 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.5: Einstellungen (⚙️ auf dem Startbildschirm): nach Updates suchen, automatische Prüfung,
+  helles/dunkles Design, topografische Karte, Bildschirm im Spiel anlassen, GPS-Sparmodus, Foto-Qualität,
+  Benachrichtigungen, Passwort ändern, Abmelden, Konto löschen, Zwischenspeicher leeren.
+  Neuer Startbildschirm mit Profilbild, „Spiel beitreten“ im Mittelpunkt und Kacheln.
 - Neu in 2.4: Fotos im Vollbild mit Emoji-Reaktionen, Karten-Tab nur mit Karte (Hinweise im Aktionen-Tab),
   Spielverlauf mit vergangenen Runden, Profilbild, persönliche Galerie und Vitrine, seltenere Fähigkeiten
 - Neu in 2.3: Chat für alle (🌍), alle Fotos nach Spielende als ZIP, eigene Quests im Einstellungs-Formular,

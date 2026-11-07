@@ -45,7 +45,7 @@ fun UpdateChecker() {
     val rel by Updater.available.collectAsState()
     val progress by Updater.progress.collectAsState()
     var opened by remember { mutableIntStateOf(0) }
-    var dismissed by rememberSaveable { mutableStateOf<String?>(null) }
+    val dismissed by Updater.dismissed.collectAsState()
     var downloaded by remember { mutableStateOf<File?>(null) }
     var signerMismatch by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -57,7 +57,7 @@ fun UpdateChecker() {
     }
     LaunchedEffect(opened) {
         if (opened == 0) return@LaunchedEffect
-        dismissed = null // jedes Öffnen fragt wieder
+        Updater.dismissed.value = null // jedes Öffnen fragt wieder
         Updater.check()
     }
 
@@ -74,7 +74,7 @@ fun UpdateChecker() {
     }
 
     AlertDialog(
-        onDismissRequest = { if (progress == null) dismissed = r.version },
+        onDismissRequest = { if (progress == null) Updater.dismissed.value = r.version },
         title = { Text("⬆️ Update verfügbar") },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -117,6 +117,6 @@ fun UpdateChecker() {
                 },
             ) { Text(if (downloaded != null) "Installieren" else "Jetzt aktualisieren") }
         },
-        dismissButton = { TextButton(enabled = progress == null, onClick = { dismissed = r.version }) { Text("Später") } },
+        dismissButton = { TextButton(enabled = progress == null, onClick = { Updater.dismissed.value = r.version }) { Text("Später") } },
     )
 }

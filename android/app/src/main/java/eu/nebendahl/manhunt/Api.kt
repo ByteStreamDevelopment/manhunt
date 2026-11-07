@@ -88,6 +88,15 @@ object Api {
     fun reset(login: String, code: String, password: String): Account =
         parseAccount(json(post("/api/auth/reset", null, JSONObject().put("login", login).put("code", code).put("password", password))))
 
+    /** Passwort ändern; gibt das Konto mit neuem Token zurück (andere Geräte werden abgemeldet). */
+    fun changePassword(accountToken: String, oldPassword: String, newPassword: String): Account =
+        parseAccount(json(post("/api/me/password", null, JSONObject().put("oldPassword", oldPassword).put("newPassword", newPassword), account = accountToken)))
+
+    /** Konto endgültig löschen (Passwort zur Bestätigung). */
+    fun deleteAccount(accountToken: String, password: String) {
+        json(post("/api/me/delete", null, JSONObject().put("password", password), account = accountToken))
+    }
+
     fun me(accountToken: String): JSONObject =
         json(Request.Builder().url(url("/api/auth/me")).header("x-account", accountToken).build())
 

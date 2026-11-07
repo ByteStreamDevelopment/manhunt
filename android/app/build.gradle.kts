@@ -17,8 +17,8 @@ android {
         targetSdk = 35
         // Beim Release-Build setzt der Forgejo-Workflow beides aus dem Git-Tag (z. B. v2.3.4 -> 2.3.4 / 2030004).
         // Lokal gilt der Grundwert; der automatische Tag auf GitHub nimmt "major.minor" von hier.
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2040000
-        versionName = (project.findProperty("versionName") as String?) ?: "2.4"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2050000
+        versionName = (project.findProperty("versionName") as String?) ?: "2.5"
         // Server-Adresse der Manhunt-Website
         buildConfigField("String", "BASE_URL", "\"https://manhunt.nebendahl.eu\"")
         // Hier fragt die App beim Öffnen nach einer neueren Version (Forgejo-Releases, öffentlich)
