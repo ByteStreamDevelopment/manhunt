@@ -39,7 +39,16 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
-- Beitreten per Code oder Einladungslink, Regeln des Spiels vorab sichtbar, Name wird gemerkt
+- Account mit E-Mail-Bestätigung (Registrieren, Code eingeben, Passwort vergessen); Name im Spiel = Benutzername
+- Bestenliste und Galerie der besten Fotos (mit Fotograf), direkt in der App
+- Tab „Aktionen“: Fähigkeiten einsetzen (Freeze, Tarnkappe, Radar …), Quests mit Countdown, Ziel auf der Karte
+  und Foto-Knopf, Fähigkeiten zum Einsammeln (🎁) – werden automatisch eingesammelt, sobald man nah genug ist
+- Eingefrorene Hunter sehen einen Freeze-Bildschirm mit Countdown (und können ggf. den Eisbrecher einsetzen)
+- Live-Strafe: Kommt das Foto zu spät, sendet die App automatisch alle paar Sekunden (Hinweis oben)
+- Genauerer Standort: GPS läuft feiner als gesendet wird, gesendet wird die genaueste Position der letzten 15 s;
+  Warnung, wenn nur „ungefährer Standort“ erlaubt ist
+- Anti-Cheat: Die App meldet aktive VPNs und Fake-GPS-Positionen an den Server
+- Beitreten per Code oder Einladungslink, Regeln des Spiels vorab sichtbar
 - Karte (OpenStreetMap): eigene GPS-Position mit Genauigkeit, Spieler mit Namen, Spuren, Spielzone,
   Unschärfe-Kreise (wenn die Spielleitung Positionen verwischt), veraltete Positionen blass,
   „Alle zeigen" und „Zu mir"

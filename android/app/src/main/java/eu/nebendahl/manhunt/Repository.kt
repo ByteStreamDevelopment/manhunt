@@ -11,18 +11,21 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
-/** Hält Sitzung und Spielzustand. Wird von der Oberfläche und vom Standort-Dienst gemeinsam genutzt. */
+/** Hält Account, Sitzung und Spielzustand. Wird von der Oberfläche und vom Standort-Dienst gemeinsam genutzt. */
 object GameRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var prefs: android.content.SharedPreferences? = null
     private var job: Job? = null
 
+    val account = MutableStateFlow<Account?>(null)
+    val catalog = MutableStateFlow<Catalog?>(null)
     val session = MutableStateFlow<Session?>(null)
     val state = MutableStateFlow<GameState?>(null)
     val error = MutableStateFlow<String?>(null)
@@ -31,8 +34,15 @@ object GameRepository {
     val myFix = MutableStateFlow<Loc?>(null)
     /** Zeitpunkt des letzten erfolgreichen Foto-Uploads (Server-Zeit), bis der Zustand nachgeladen ist. */
     val localLastPhoto = MutableStateFlow(0L)
+    /** Kurze Meldungen für die Oberfläche (z. B. „Eingesammelt: Freeze“). */
+    val toasts = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    /** Letzte Position war als „Mock“ (Fake-GPS) markiert. */
+    @Volatile var lastFixMock = false
+
     @Volatile private var nextSendAt = 0L
     @Volatile private var sending = false
+    private val recentFixes = ArrayDeque<Pair<Loc, Boolean>>()
+    private val collectTried = HashMap<String, Long>()
 
     /** Server-Zeit minus lokale Zeit (ms). */
     @Volatile var clockOffset = 0L
@@ -46,11 +56,47 @@ object GameRepository {
         if (code != null && token != null) {
             session.value = Session(code, token, p.getString("id", "") ?: "", p.getString("name", "") ?: "", p.getString("role", "runner") ?: "runner")
         }
+        val at = p.getString("accToken", null)
+        if (at != null) {
+            account.value = Account(at, p.getString("accId", "") ?: "", p.getString("accName", "") ?: "", p.getString("accEmail", "") ?: "", p.getBoolean("accAdmin", false))
+        }
+        loadCatalog()
     }
+
+    fun loadCatalog() {
+        if (catalog.value != null) return
+        scope.launch { runCatching { Api.catalog() }.onSuccess { catalog.value = it } }
+    }
+
+    /* ---------------- Account ---------------- */
+
+    fun setAccount(a: Account) {
+        prefs?.edit()?.putString("accToken", a.token)?.putString("accId", a.id)?.putString("accName", a.username)
+            ?.putString("accEmail", a.email)?.putBoolean("accAdmin", a.isAdmin)?.apply()
+        account.value = a
+        error.value = null
+    }
+
+    fun logout() {
+        prefs?.edit()?.remove("accToken")?.remove("accId")?.remove("accName")?.remove("accEmail")?.remove("accAdmin")?.apply()
+        account.value = null
+    }
+
+    /** Prüft im Hintergrund, ob die Anmeldung noch gültig ist (z. B. nach Passwort-Reset auf einem anderen Gerät). */
+    fun checkAccount() {
+        val a = account.value ?: return
+        scope.launch {
+            try { Api.me(a.token) } catch (e: ApiException) {
+                if (e.status == 401) { logout(); error.value = "Bitte melde dich erneut an." }
+            }
+        }
+    }
+
+    /* ---------------- Sitzung ---------------- */
 
     fun setSession(s: Session) {
         prefs?.edit()?.putString("code", s.code)?.putString("token", s.token)?.putString("id", s.playerId)
-            ?.putString("name", s.name)?.putString("role", s.role)?.putString("lastName", s.name)?.apply()
+            ?.putString("name", s.name)?.putString("role", s.role)?.apply()
         session.value = s
         state.value = null
         error.value = null
@@ -61,13 +107,9 @@ object GameRepository {
         connect()
     }
 
-    /** Zuletzt benutzter Spielername (bleibt nach dem Verlassen erhalten). */
-    fun lastName(): String = prefs?.getString("lastName", "") ?: ""
-
     fun leave() {
         job?.cancel(); job = null
-        val name = lastName().ifBlank { session.value?.name.orEmpty() }
-        prefs?.edit()?.clear()?.putString("lastName", name)?.apply()
+        prefs?.edit()?.remove("code")?.remove("token")?.remove("id")?.remove("name")?.remove("role")?.apply()
         session.value = null
         state.value = null
         lastSentAt.value = null
@@ -116,15 +158,23 @@ object GameRepository {
         return false
     }
 
+    fun refreshNow() {
+        val s = session.value ?: return
+        scope.launch { runCatching { refresh(s) } }
+    }
+
     private fun refresh(s: Session) {
         val st = Api.state(s.code, s.token)
         clockOffset = st.now - System.currentTimeMillis()
         val prev = state.value
-        if (prev != null && (prev.game.status != st.game.status ||
-                prev.settings.locationIntervalSec != st.settings.locationIntervalSec)) nextSendAt = 0L
+        if (prev != null && (prev.game.status != st.game.status || prev.self.sendIntervalSec != st.self.sendIntervalSec ||
+                prev.self.live != st.self.live)
+        ) nextSendAt = 0L // sofort senden, z. B. wenn man gerade live geschaltet wurde
         if (st.game.status == "lobby") localLastPhoto.value = 0L
         state.value = st
         error.value = null
+        // Gerade live geschaltet? Dann direkt die letzte gute Position schicken
+        if (nextSendAt == 0L) myFix.value?.let { f -> sendIfDue(f, lastFixMock) }
     }
 
     /** Server-Sent Events: blockiert, bis die Verbindung endet. */
@@ -146,25 +196,96 @@ object GameRepository {
         }
     }
 
-    /** Neue GPS-Position vom Standort-Dienst. Gesendet wird nur, wenn die Spielregeln es verlangen. */
-    fun onFix(lat: Double, lng: Double, acc: Double) {
-        myFix.value = Loc(lat, lng, acc, System.currentTimeMillis())
+    /* ---------------- Standort ---------------- */
+
+    /**
+     * Neue GPS-Position vom Standort-Dienst. Für mehr Genauigkeit wird aus den Positionen der letzten
+     * Sekunden die genaueste ausgewählt. Gesendet wird nur, wenn die Spielregeln es verlangen.
+     */
+    fun onFix(lat: Double, lng: Double, acc: Double, mock: Boolean) {
+        val now = System.currentTimeMillis()
+        val fix = Loc(lat, lng, acc, now)
+        lastFixMock = mock
+        synchronized(recentFixes) {
+            recentFixes.addLast(fix to mock)
+            while (recentFixes.isNotEmpty() && now - recentFixes.first().first.ts > 15_000) recentFixes.removeFirst()
+        }
+        myFix.value = fix
+        sendIfDue(fix, mock)
+        autoCollect(fix, mock)
+    }
+
+    private fun bestRecentFix(): Pair<Loc, Boolean>? = synchronized(recentFixes) {
+        // Genaueste der letzten 15 s; bei gleicher Genauigkeit die neuere
+        recentFixes.minWithOrNull(compareBy<Pair<Loc, Boolean>> { it.first.acc }.thenByDescending { it.first.ts })
+    }
+
+    private fun sendIfDue(latest: Loc, latestMock: Boolean) {
         val s = session.value ?: return
         val st = state.value ?: return
         if (!st.shouldShare() || sending || System.currentTimeMillis() < nextSendAt) return
+        val live = st.self.live != null
+        // Im Live-Modus zählt Aktualität, sonst Genauigkeit
+        val (fix, mock) = if (live) latest to latestMock else bestRecentFix() ?: (latest to latestMock)
         sending = true
         scope.launch {
             try {
-                val next = Api.postLocation(s.code, s.token, lat, lng, acc)
+                val next = Api.postLocation(s.code, s.token, fix.lat, fix.lng, fix.acc, mock)
                 if (next.ok) lastSentAt.value = System.currentTimeMillis()
                 // Etwas früher wieder senden dürfen, damit das Intervall nicht durch GPS-Verzögerung wächst
                 nextSendAt = System.currentTimeMillis() + (next.nextInMs * 0.85).toLong()
             } catch (e: ApiException) {
-                if (e.status == 401 || e.status == 404) onFailure(e) else nextSendAt = System.currentTimeMillis() + 8_000
+                when {
+                    e.status == 401 || e.status == 404 -> onFailure(e)
+                    e.data.optBoolean("spoof") || e.data.optBoolean("vpn") -> {
+                        error.value = e.message
+                        nextSendAt = System.currentTimeMillis() + 15_000
+                    }
+                    else -> nextSendAt = System.currentTimeMillis() + 8_000
+                }
             } finally {
                 sending = false
             }
         }
+    }
+
+    /** Fähigkeiten auf der Karte automatisch einsammeln, wenn man nah genug dran ist. */
+    private fun autoCollect(fix: Loc, mock: Boolean) {
+        val s = session.value ?: return
+        val st = state.value ?: return
+        if (st.game.status != "running" || st.self.caught || st.pickups.isEmpty()) return
+        if (st.frozen(System.currentTimeMillis() + clockOffset)) return
+        val reach = st.settings.pickupCollectM + minOf(fix.acc, 25.0)
+        val pu = st.pickups.firstOrNull { haversine(fix.lat, fix.lng, it.lat, it.lng) <= reach } ?: return
+        val now = System.currentTimeMillis()
+        if (now - (collectTried[pu.id] ?: 0L) < 20_000) return
+        collectTried[pu.id] = now
+        scope.launch {
+            try {
+                val key = Api.collect(s.code, s.token, pu.id, fix, mock)
+                val a = catalog.value?.ability(key)
+                toasts.tryEmit(if (a != null) "🎁 Eingesammelt: ${a.icon} ${a.name}" else "🎁 Fähigkeit eingesammelt!")
+                runCatching { refresh(s) }
+            } catch (e: ApiException) {
+                if (e.status != 404) toasts.tryEmit(e.message ?: "Einsammeln fehlgeschlagen")
+            }
+        }
+    }
+
+    /* ---------------- Aktionen ---------------- */
+
+    suspend fun collect(pickupId: String): String {
+        val s = session.value ?: throw ApiException(0, "Nicht im Spiel")
+        return withContext(Dispatchers.IO) {
+            val key = Api.collect(s.code, s.token, pickupId, myFix.value, lastFixMock)
+            runCatching { refresh(s) }
+            key
+        }
+    }
+
+    suspend fun useAbility(key: String, targetId: String?) {
+        val s = session.value ?: return
+        withContext(Dispatchers.IO) { Api.useAbility(s.code, s.token, key, targetId); runCatching { refresh(s) } }
     }
 
     suspend fun markCaught(playerId: String, caught: Boolean) {
@@ -172,11 +293,11 @@ object GameRepository {
         withContext(Dispatchers.IO) { Api.setCaught(s.code, s.token, playerId, caught); runCatching { refresh(s) } }
     }
 
-    suspend fun uploadPhoto(jpeg: ByteArray) {
+    suspend fun uploadPhoto(jpeg: ByteArray, questId: String? = null) {
         val s = session.value ?: return
         withContext(Dispatchers.IO) {
-            Api.uploadPhoto(s.code, s.token, jpeg)
-            localLastPhoto.value = System.currentTimeMillis() + clockOffset
+            Api.uploadPhoto(s.code, s.token, jpeg, questId)
+            if (s.role == "runner") localLastPhoto.value = System.currentTimeMillis() + clockOffset
             runCatching { refresh(s) }
         }
     }
@@ -190,14 +311,24 @@ object GameRepository {
         val s = session.value ?: return null
         return withContext(Dispatchers.IO) {
             try {
-                val bytes = Api.photoBytes(s.code, s.token, id)
-                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                if (bmp != null) photoCache.put(id, bmp)
-                bmp
+                decode(id, Api.photoBytes(s.code, s.token, id))
             } catch (e: Exception) {
                 null
             }
         }
+    }
+
+    suspend fun loadGalleryPhoto(id: String): Bitmap? {
+        photoCache.get("g:$id")?.let { return it }
+        return withContext(Dispatchers.IO) {
+            try { decode("g:$id", Api.galleryBytes(id)) } catch (e: Exception) { null }
+        }
+    }
+
+    private fun decode(key: String, bytes: ByteArray): Bitmap? {
+        val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (bmp != null) photoCache.put(key, bmp)
+        return bmp
     }
 }

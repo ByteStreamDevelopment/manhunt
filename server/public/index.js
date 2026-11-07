@@ -1,7 +1,15 @@
 'use strict';
 (() => {
-  const { $, h, api } = MH;
+  const { $, h, api, account } = MH;
   const input = $('#code'), err = $('#err');
+
+  function render() {
+    const acc = account.get();
+    $('#joinCard').hidden = !acc;
+    $('#authSlot').replaceChildren(acc ? '' : MHAuth.box(render));
+    if (acc) $('#accName').textContent = acc.username;
+  }
+  $('#logoutBtn').addEventListener('click', () => { account.set(null); render(); });
 
   async function go() {
     const code = input.value.trim().toUpperCase();
@@ -17,7 +25,7 @@
   const items = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k.startsWith('manhunt:') || k === 'manhunt:admin') continue;
+    if (!/^manhunt:[A-Z0-9]{3,10}$/.test(k)) continue;
     try { const v = JSON.parse(localStorage.getItem(k)); items.push({ code: k.slice(8), ...v }); } catch { /* ignorieren */ }
   }
   if (items.length) {
@@ -28,4 +36,5 @@
       h('a', { class: 'btn small light', href: `/g/${it.code}` }, 'Öffnen'),
     )));
   }
+  render();
 })();

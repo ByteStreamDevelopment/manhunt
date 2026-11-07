@@ -15,6 +15,7 @@ import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -68,6 +69,7 @@ class TrackingService : Service() {
     // Für Ereignis-Benachrichtigungen
     private var seenMsgs: MutableSet<String>? = null
     private var seenPhotos: MutableSet<String>? = null
+    private var seenInbox: MutableSet<String>? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -128,10 +130,18 @@ class TrackingService : Service() {
             st.game.status == "lobby" -> { stopLocation(); setText("Warte auf den Spielstart") }
             st.self.caught -> { stopLocation(); Notif.cancelPhotoAlarm(this); setText("Du wurdest gefangen") }
             else -> {
-                setText(if (st.shouldShare()) "Standort wird geteilt" else "Spiel läuft – dein Standort wird nicht geteilt")
-                // Für Runner gilt das Intervall der Spielleitung; die eigene Position auf der Karte
-                // soll trotzdem nicht zu alt sein (max. 30 s).
-                val interval = minOf(st.settings.locationIntervalSec * 1000L, 30_000L)
+                val serverNow = System.currentTimeMillis() + GameRepository.clockOffset
+                setText(
+                    when {
+                        st.self.live != null -> "LIVE: Standort wird alle ${st.self.sendIntervalSec} s geteilt"
+                        st.frozen(serverNow) -> "🧊 Eingefroren"
+                        st.shouldShare() -> "Standort wird geteilt"
+                        else -> "Spiel läuft – dein Standort wird nicht geteilt"
+                    },
+                )
+                // GPS läuft öfter als gesendet wird: So steht beim Senden immer eine frische, genaue Position bereit.
+                val interval = if (st.self.live != null) maxOf(2_000L, st.self.sendIntervalSec * 1000L)
+                else minOf(st.self.sendIntervalSec * 1000L, 10_000L)
                 ensureLocation(interval)
             }
         }
@@ -144,6 +154,7 @@ class TrackingService : Service() {
         if (msgs == null || photos == null) {
             seenMsgs = st.messages.map { it.id }.toMutableSet()
             seenPhotos = st.photos.map { it.id }.toMutableSet()
+            seenInbox = st.self.inbox.map { it.id }.toMutableSet()
             return
         }
         if (st.game.status == "lobby" && st.messages.isEmpty()) { msgs.clear(); photos.clear() }
@@ -151,9 +162,25 @@ class TrackingService : Service() {
             if (!msgs.add(m.id)) continue
             when {
                 m.kind == "admin" -> Notif.event(this, "📣 Spielleitung", m.text)
-                m.text.contains("beigetreten") -> {} // in der Lobby zu viel Rauschen
-                else -> Notif.event(this, st.game.name, m.text)
+                m.kind == "cheat" || m.text.contains("beigetreten") -> {} // zu viel Rauschen
+                // Wichtige Spielereignisse; alles Persönliche kommt über die Inbox
+                listOf("Spiel beendet", "Das Spiel läuft", "gefangen", "wieder im Spiel", "eingefroren", "Freeze", "Radar", "Fotobefehl", "kein Foto")
+                    .any { m.text.contains(it) } -> Notif.event(this, st.game.name, m.text)
+                else -> {}
             }
+        }
+        val inbox = seenInbox
+        if (inbox == null) seenInbox = st.self.inbox.map { it.id }.toMutableSet()
+        else for (m in st.self.inbox) {
+            if (!inbox.add(m.id)) continue
+            val title = when (m.kind) {
+                "quest" -> "Neue Quest"
+                "reward" -> "Belohnung"
+                "bad" -> "Achtung!"
+                "good" -> "Gute Nachricht"
+                else -> st.game.name
+            }
+            Notif.event(this, title, m.text)
         }
         for (ph in st.photos) {
             if (!photos.add(ph.id)) continue
@@ -169,21 +196,28 @@ class TrackingService : Service() {
         if (callback != null && currentIntervalMs == intervalMs) return
         stopLocation()
         if (!hasLocationPermission(this)) return
+        // Höchste Genauigkeit: echtes GPS, feinste Auflösung, keine gebündelte/verzögerte Auslieferung
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
-            .setMinUpdateIntervalMillis(intervalMs / 2)
-            .setWaitForAccurateLocation(false)
+            .setMinUpdateIntervalMillis(maxOf(1_000L, intervalMs / 2))
+            .setMinUpdateDistanceMeters(0f)
+            .setGranularity(Granularity.GRANULARITY_FINE)
+            .setMaxUpdateDelayMillis(0)
+            .setWaitForAccurateLocation(true)
             .build()
         val cb = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                val l = result.lastLocation ?: return
-                GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble())
+                // Alle Positionen der Lieferung durchgehen, das Repository wählt die genaueste
+                for (l in result.locations) {
+                    if (!l.hasAccuracy() || l.accuracy > 500f) continue
+                    GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble(), isMock(l))
+                }
             }
         }
         try {
             fused.requestLocationUpdates(req, cb, Looper.getMainLooper())
             // Sofort eine Position holen, damit nicht erst ein ganzes Intervall vergeht
             fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).addOnSuccessListener { l ->
-                if (l != null) GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble())
+                if (l != null) GameRepository.onFix(l.latitude, l.longitude, l.accuracy.toDouble(), isMock(l))
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "Keine Standortberechtigung", e)
@@ -196,6 +230,11 @@ class TrackingService : Service() {
             wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "manhunt:tracking").apply { acquire(12 * 60 * 60 * 1000L) }
         }
     }
+
+    /** Position aus einer Fake-GPS-App? (Anti-Spoofing, der Server entscheidet über die Folgen) */
+    @Suppress("DEPRECATION")
+    private fun isMock(l: android.location.Location): Boolean =
+        if (Build.VERSION.SDK_INT >= 31) l.isMock else l.isFromMockProvider
 
     private fun stopLocation() {
         callback?.let { fused.removeLocationUpdates(it) }

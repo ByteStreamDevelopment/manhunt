@@ -123,9 +123,19 @@ fun MhTheme(content: @Composable () -> Unit) {
 @Composable
 fun App(inviteCode: String?) {
     val session by GameRepository.session.collectAsState()
+    val account by GameRepository.account.collectAsState()
+    var screen by rememberSaveable { mutableStateOf("main") }
+    LaunchedEffect(Unit) { GameRepository.checkAccount(); GameRepository.loadCatalog() }
     val s = session
+    val a = account
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        if (s == null) JoinScreen(inviteCode) else GameScreen()
+        when {
+            screen == "leaderboard" -> LeaderboardScreen { screen = "main" }
+            screen == "gallery" -> GalleryScreen { screen = "main" }
+            s != null -> GameScreen(openLeaderboard = { screen = "leaderboard" })
+            a == null -> AuthScreen()
+            else -> HomeScreen(a, inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" })
+        }
     }
 }
 
@@ -149,7 +159,7 @@ private fun hasNotifPermission(ctx: Context) =
 private fun ignoresBatteryOpt(ctx: Context) =
     (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
 
-private fun openAppSettings(ctx: Context) {
+internal fun openAppSettings(ctx: Context) {
     ctx.startActivity(
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -172,146 +182,11 @@ private fun requestIgnoreBatteryOpt(ctx: Context) {
     }
 }
 
-private val gamePermissions: Array<String> = buildList {
+internal val gamePermissions: Array<String> = buildList {
     add(Manifest.permission.ACCESS_FINE_LOCATION)
     add(Manifest.permission.ACCESS_COARSE_LOCATION)
     if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
 }.toTypedArray()
-
-/* ------------------------------------------------------------------ */
-/* Beitreten                                                           */
-/* ------------------------------------------------------------------ */
-
-@Composable
-fun JoinScreen(inviteCode: String?) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var code by rememberSaveable(inviteCode) { mutableStateOf(inviteCode.orEmpty()) }
-    var info by remember { mutableStateOf<LobbyInfo?>(null) }
-    var name by rememberSaveable { mutableStateOf(GameRepository.lastName()) }
-    var role by rememberSaveable { mutableStateOf("runner") }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val notice by GameRepository.error.collectAsState()
-
-    fun lookup() {
-        val c = code.trim().uppercase()
-        if (c.length < 3) return
-        scope.launch {
-            busy = true; error = null
-            try {
-                info = withContext(Dispatchers.IO) { Api.info(c) }
-            } catch (e: ApiException) {
-                info = null
-                error = if (e.status == 404) "Den Code $c gibt es nicht." else e.message
-            } finally {
-                busy = false
-            }
-        }
-    }
-
-    // Einladungslink: Spiel sofort suchen
-    LaunchedEffect(inviteCode) { if (!inviteCode.isNullOrBlank()) lookup() }
-
-    fun join() {
-        val i = info ?: return
-        scope.launch {
-            busy = true; error = null
-            try {
-                val s = withContext(Dispatchers.IO) { Api.join(i.code, name.trim(), role) }
-                GameRepository.setSession(s)
-                TrackingService.start(ctx)
-            } catch (e: ApiException) {
-                error = e.message
-            } finally {
-                busy = false
-            }
-        }
-    }
-
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
-        if (res[Manifest.permission.ACCESS_FINE_LOCATION] == true || res[Manifest.permission.ACCESS_COARSE_LOCATION] == true) join()
-        else error = "Ohne Standortfreigabe kannst du nicht mitspielen. Du kannst sie in den App-Einstellungen erlauben."
-    }
-
-    Column(
-        Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text("Manhunt", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        Text("Runner teilen Standort und Fotos, Hunter jagen sie.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        notice?.let {
-            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-                Text(it, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)
-            }
-        }
-
-        OutlinedTextField(
-            value = code,
-            onValueChange = { code = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(10); info = null; error = null },
-            label = { Text("Spielcode") },
-            placeholder = { Text("z. B. AB3CD") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { lookup() }),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (info == null) {
-            Button(onClick = { lookup() }, enabled = !busy && code.length >= 3, modifier = Modifier.fillMaxWidth()) {
-                Text(if (busy) "Suche …" else "Spiel suchen")
-            }
-        }
-
-        info?.let { i ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(i.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    val status = when (i.status) { "lobby" -> "wartet auf den Start"; "running" -> "läuft"; else -> "beendet" }
-                    Text("Status: $status · ${i.runners} Runner, ${i.hunters} Hunter")
-                    Text("So läuft dieses Spiel", Modifier.padding(top = 6.dp), fontWeight = FontWeight.Bold)
-                    Text("• Runner teilen ihren Standort alle ${fmtInterval(i.locationIntervalSec)}.")
-                    if (i.photosEnabled) Text("• Runner laden alle ${i.photoIntervalMin} Minuten ein Foto hoch.")
-                    if (i.headStartMin > 0) Text("• Runner haben ${i.headStartMin} Minuten Vorsprung, bevor die Hunter sie sehen.")
-                    if (i.fuzzMeters > 0) Text("• Hunter sehen die Runner nur ungefähr (bis zu ${i.fuzzMeters} m versetzt).")
-                    if (i.zoneEnabled) Text("• Es gibt eine Spielzone. Wer sie verlässt, wird gewarnt.")
-                }
-            }
-            if (i.status == "ended") {
-                Text("Dieses Spiel ist schon beendet.", color = MaterialTheme.colorScheme.error)
-            } else {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it.take(24) },
-                    label = { Text("Dein Name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilterChip(selected = role == "runner", onClick = { role = "runner" }, label = { Text("🏃 Runner") })
-                    FilterChip(selected = role == "hunter", onClick = { role = "hunter" }, label = { Text("🎯 Hunter") })
-                }
-                Text(
-                    if (role == "runner") "Du wirst gejagt und teilst deinen Standort." else "Du suchst die Runner anhand ihres Standorts.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(
-                    onClick = { error = null; permLauncher.launch(gamePermissions) },
-                    enabled = !busy && name.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (busy) "Bitte warten …" else "Spiel beitreten") }
-                Text(
-                    "Mit dem Beitritt erlaubst du, dass dein Standort und deine Fotos für die Mitspielenden sichtbar sind (Runner) " +
-                        "bzw. du die Positionen der Runner siehst (Hunter). Die App teilt den Standort auch bei gesperrtem Bildschirm, " +
-                        "solange du im Spiel bist.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = { info = null; error = null }) { Text("Anderen Code eingeben") }
-        }
-        error?.let {
-            Text(it, color = MaterialTheme.colorScheme.error)
-            if (it.contains("App-Einstellungen")) OutlinedButton(onClick = { openAppSettings(ctx) }) { Text("App-Einstellungen öffnen") }
-        }
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /* Spiel                                                               */
@@ -336,7 +211,7 @@ private fun Banner(text: String, kind: BannerKind = BannerKind.Info, action: Str
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GameScreen() {
+fun GameScreen(openLeaderboard: () -> Unit) {
     val ctx = LocalContext.current
     val st by GameRepository.state.collectAsState()
     val err by GameRepository.error.collectAsState()
@@ -350,6 +225,9 @@ fun GameScreen() {
     val serverNow = now + GameRepository.clockOffset
     val resume = resumeTick()
     val hasLocPerm = remember(resume) { TrackingService.hasLocationPermission(ctx) }
+    val hasFine = remember(resume) {
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
     val hasNotif = remember(resume) { hasNotifPermission(ctx) }
     val batteryOk = remember(resume) { ignoresBatteryOpt(ctx) }
     var askedOnce by rememberSaveable { mutableStateOf(false) }
@@ -364,8 +242,14 @@ fun GameScreen() {
     val g = st
     val photoCount = g?.photos?.size ?: 0
     LaunchedEffect(tab, photoCount, g != null) {
-        if (g != null && (tab == 2 || seenPhotoCount < 0)) seenPhotoCount = photoCount
+        if (g != null && (tab == 3 || seenPhotoCount < 0)) seenPhotoCount = photoCount
     }
+    // Kurze Meldungen aus dem Hintergrund (z. B. automatisch eingesammelte Fähigkeiten)
+    LaunchedEffect(Unit) { GameRepository.toasts.collect { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }
+    val shooter = rememberPhotoShooter()
+    val activeQuests = g?.self?.quests?.count { it.status == "active" } ?: 0
+
+  Box(Modifier.fillMaxSize()) {
 
     Scaffold(
         topBar = {
@@ -389,15 +273,19 @@ fun GameScreen() {
         bottomBar = {
             NavigationBar {
                 val newPhotos = (photoCount - seenPhotoCount).coerceAtLeast(0)
-                listOf("🗺️" to "Karte", "👥" to "Spieler", "📷" to "Fotos", "💬" to "Meldungen").forEachIndexed { i, (icon, label) ->
+                listOf("🗺️" to "Karte", "⚡" to "Aktionen", "👥" to "Spieler", "📷" to "Fotos", "💬" to "Meldungen").forEachIndexed { i, (icon, label) ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i },
                         icon = {
-                            if (i == 2 && newPhotos > 0 && tab != 2) BadgedBox(badge = { Badge { Text("$newPhotos") } }) { Text(icon) }
-                            else Text(icon)
+                            val badge = when {
+                                i == 3 && tab != 3 && newPhotos > 0 -> "$newPhotos"
+                                i == 1 && tab != 1 && activeQuests > 0 -> "$activeQuests"
+                                else -> null
+                            }
+                            if (badge != null) BadgedBox(badge = { Badge { Text(badge) } }) { Text(icon) } else Text(icon)
                         },
-                        label = { Text(label) },
+                        label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
                     )
                 }
             }
@@ -418,6 +306,10 @@ fun GameScreen() {
                         Banner("Standortfreigabe fehlt – ohne sie kannst du nicht mitspielen.", BannerKind.Error, "Erlauben") {
                             if (askedOnce) openAppSettings(ctx) else permLauncher.launch(gamePermissions)
                         }
+                    } else if (!hasFine) {
+                        Banner("Nur „ungefährer Standort“ erlaubt – bitte „genau“ erlauben, sonst ist deine Position bis zu 3 km daneben.", BannerKind.Error, "Ändern") {
+                            openAppSettings(ctx)
+                        }
                     } else if (!hasNotif && g.self.role == "runner") {
                         Banner("Benachrichtigungen sind aus – du verpasst den Foto-Alarm.", BannerKind.Warn, "Erlauben") {
                             if (askedOnce) openAppSettings(ctx) else permLauncher.launch(gamePermissions)
@@ -428,12 +320,13 @@ fun GameScreen() {
                         }
                     }
                 }
-                StatusBanners(g, serverNow) { tab = 2 }
+                StatusBanners(g, serverNow) { tab = 3 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (tab) {
                         0 -> MapTab(g, serverNow, focus) { focus = null }
-                        1 -> PlayersTab(g, serverNow) { id -> focus = MapFocus(id); tab = 0 }
-                        2 -> PhotosTab(g, serverNow)
+                        1 -> ActionsTab(g, serverNow, shooter, showOnMap = { la, ln -> focus = MapFocus(point = la to ln); tab = 0 }, openLeaderboard = openLeaderboard)
+                        2 -> PlayersTab(g, serverNow) { id -> focus = MapFocus(playerId = id); tab = 0 }
+                        3 -> PhotosTab(g, serverNow, shooter)
                         else -> MessagesTab(g)
                     }
                 }
@@ -441,11 +334,14 @@ fun GameScreen() {
         }
     }
 
+    g?.let { FreezeOverlay(it, serverNow) }
+  }
+
     if (confirmLeave) {
         AlertDialog(
             onDismissRequest = { confirmLeave = false },
             title = { Text("Spiel verlassen?") },
-            text = { Text("Du hörst auf, deinen Standort zu teilen. Zum Zurückkehren musst du neu beitreten (mit einem anderen Namen).") },
+            text = { Text("Du hörst auf, deinen Standort zu teilen. Mit demselben Account kannst du später wieder beitreten.") },
             confirmButton = {
                 TextButton(onClick = { confirmLeave = false; leave(ctx) }) { Text("Verlassen") }
             },
@@ -489,6 +385,13 @@ private fun StatusBanners(st: GameState, serverNow: Long, openPhotos: () -> Unit
             if (st.self.caught) {
                 Banner("Du wurdest gefangen. Danke fürs Mitspielen! Dein Standort wird nicht mehr geteilt.", BannerKind.Warn)
             } else {
+                liveReasonText(st.self.live)?.let { txt ->
+                    val until = st.self.liveUntil
+                    Banner(txt + (until?.let { " Noch ${fmtDur(it - serverNow)}." } ?: ""), BannerKind.Error, if (st.self.live == "photo" || st.self.live == "order") "Foto" else null, openPhotos)
+                }
+                st.self.photoOrderDue?.let { due ->
+                    if (due > serverNow) Banner("📸 Fotobefehl! Noch ${fmtDur(due - serverNow)} für ein Foto, sonst bist du live.", BannerKind.Error, "Foto", openPhotos)
+                }
                 st.photoDue(serverNow, localLastPhoto)?.let { pd ->
                     if (pd.overdue) Banner("📷 Foto fällig! Seit ${fmtDur(serverNow - pd.prevDue)} überfällig.", BannerKind.Error, "Aufnehmen", openPhotos)
                     else Banner("Nächstes Foto in ${fmtDur(pd.nextDue - serverNow)}")
@@ -615,54 +518,13 @@ private fun PlayersTab(st: GameState, serverNow: Long, showOnMap: (String) -> Un
 /* ------------------------------------------------------------------ */
 
 @Composable
-private fun PhotosTab(st: GameState, serverNow: Long) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
+private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
     var open by remember { mutableStateOf<PhotoRef?>(null) }
     val names = st.players.associate { it.id to it.name }
     val localLastPhoto by GameRepository.localLastPhoto.collectAsState()
-
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val f = pendingPath?.let { File(it) }
-        pendingPath = null
-        if (ok && f != null && f.length() > 0) {
-            scope.launch {
-                busy = true
-                try {
-                    val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
-                    val bytes = withContext(Dispatchers.Default) { prepareJpeg(ctx, uri) }
-                    GameRepository.uploadPhoto(bytes)
-                    Notif.cancelPhotoAlarm(ctx)
-                    Toast.makeText(ctx, "Foto hochgeladen", Toast.LENGTH_SHORT).show()
-                } catch (e: ApiException) {
-                    Toast.makeText(ctx, "Foto-Upload fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
-                } catch (e: Exception) {
-                    Toast.makeText(ctx, "Foto konnte nicht verarbeitet werden", Toast.LENGTH_LONG).show()
-                } finally {
-                    busy = false
-                    f.delete()
-                }
-            }
-        } else {
-            f?.delete()
-        }
-    }
-
-    fun shoot() {
-        val dir = File(ctx.cacheDir, "photos").apply { mkdirs() }
-        val f = File.createTempFile("shot", ".jpg", dir)
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
-        pendingPath = f.absolutePath
-        try {
-            launcher.launch(uri)
-        } catch (e: ActivityNotFoundException) {
-            pendingPath = null
-            f.delete()
-            Toast.makeText(ctx, "Keine Kamera-App gefunden.", Toast.LENGTH_LONG).show()
-        }
-    }
+    val cat by GameRepository.catalog.collectAsState()
+    val busy = shooter.busy
+    fun shoot() = shooter.shoot(null)
 
     val due = st.photoDue(serverNow, localLastPhoto)
     val sorted = st.photos.sortedByDescending { it.ts }
@@ -730,7 +592,7 @@ private fun PhotosTab(st: GameState, serverNow: Long) {
                     val b = bmp
                     if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
                     else Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr", Modifier.padding(top = 6.dp))
+                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> cat?.quest(q)?.let { d -> " · ${d.icon} ${d.title}" } } ?: ""), Modifier.padding(top = 6.dp))
                 }
             }
         }

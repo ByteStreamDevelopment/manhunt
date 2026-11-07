@@ -52,9 +52,11 @@ private const val C_HUNTER = 0xFFD64545.toInt()
 private const val C_SELF = 0xFF2F7BFF.toInt()
 private const val C_CAUGHT = 0xFF888888.toInt()
 private const val C_ZONE = 0xFFF2BC0F.toInt()
+private const val C_QUEST = 0xFF9B6BFF.toInt()
+private const val C_LIVE = 0xFFFF3B30.toInt()
 
 /** Ein Spieler, auf den die Karte springen soll (vom Spieler-Tab aus). */
-data class MapFocus(val playerId: String, val nonce: Long = System.nanoTime())
+data class MapFocus(val playerId: String? = null, val point: Pair<Double, Double>? = null, val nonce: Long = System.nanoTime())
 
 @Composable
 fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () -> Unit) {
@@ -103,11 +105,12 @@ fun MapTab(st: GameState, serverNow: Long, focus: MapFocus?, onFocusHandled: () 
         val f = focus ?: return@LaunchedEffect
         val p = st.players.firstOrNull { it.id == f.playerId }
         val l = if (p != null && p.id == st.self.id) fix ?: p.loc else p?.loc
-        if (l != null) {
+        val target = f.point?.let { GeoPoint(it.first, it.second) } ?: l?.let { GeoPoint(it.lat, it.lng) }
+        if (target != null) {
             mapView.controller.setZoom(maxOf(mapView.zoomLevelDouble, 16.0))
-            mapView.controller.animateTo(GeoPoint(l.lat, l.lng))
+            mapView.controller.animateTo(target)
             centered = true
-            mapView.overlays.filterIsInstance<Marker>().firstOrNull { it.id == f.playerId }?.showInfoWindow()
+            if (f.playerId != null) mapView.overlays.filterIsInstance<Marker>().firstOrNull { it.id == f.playerId }?.showInfoWindow()
         }
         onFocusHandled()
     }
@@ -222,6 +225,20 @@ private fun pin(ctx: Context, color: Int, label: String, big: Boolean, faded: Bo
     return BitmapDrawable(ctx.resources, bmp)
 }
 
+/** Rundes Symbol mit Emoji (für Pickups und Quest-Ziele). */
+private fun emojiPin(ctx: Context, emoji: String, ring: Int): Drawable {
+    val d = ctx.resources.displayMetrics.density
+    val size = (34 * d).roundToInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val r = size / 2f
+    c.drawCircle(r, r, r - 2 * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 20, 32, 26) })
+    c.drawCircle(r, r, r - 2 * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ring; style = Paint.Style.STROKE; strokeWidth = 3 * d })
+    val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 18 * d; textAlign = Paint.Align.CENTER }
+    c.drawText(emoji, r, r - (tp.descent() + tp.ascent()) / 2, tp)
+    return BitmapDrawable(ctx.resources, bmp)
+}
+
 private fun circle(m: MapView, center: GeoPoint, radius: Double, color: Int, fillAlpha: Int, dashed: Boolean = false) =
     Polygon(m).apply {
         points = Polygon.pointsAsCircle(center, radius)
@@ -264,6 +281,38 @@ private fun redraw(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
             )
         }
     }
+    // Fähigkeiten zum Einsammeln und Quest-Ziele
+    for (pu in st.pickups) {
+        val gp = GeoPoint(pu.lat, pu.lng)
+        m.overlays.add(circle(m, gp, st.settings.pickupCollectM.toDouble(), C_ZONE, 40))
+        m.overlays.add(
+            Marker(m).apply {
+                id = "pickup:" + pu.id
+                position = gp
+                title = "🎁 ${pu.name}"
+                snippet = "Hier liegt eine Fähigkeit. Lauf hin, um sie einzusammeln!" +
+                    (fix?.let { "\nEntfernung: " + distTextRounded(haversine(it.lat, it.lng, pu.lat, pu.lng)) } ?: "")
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                icon = emojiPin(ctx, "🎁", C_ZONE)
+            },
+        )
+    }
+    for (q in st.self.quests) {
+        val t = q.target ?: continue
+        if (q.status != "active") continue
+        val gp = GeoPoint(t.lat, t.lng)
+        m.overlays.add(circle(m, gp, t.radiusM, C_QUEST, 30, dashed = true))
+        m.overlays.add(
+            Marker(m).apply {
+                id = "quest:" + q.id
+                position = gp
+                title = "Quest-Ziel: ${t.name}"
+                snippet = fix?.let { "Entfernung: " + distTextRounded(haversine(it.lat, it.lng, t.lat, t.lng)) } ?: ""
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                icon = emojiPin(ctx, "🚩", C_QUEST)
+            },
+        )
+    }
     val markers = mutableListOf<Marker>()
     for (p in st.players) {
         val isSelf = p.id == st.self.id
@@ -286,7 +335,11 @@ private fun redraw(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
             snippet = info.joinToString("\n")
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0.3f)
-            icon = pin(ctx, colorOf(p), if (isSelf) "Ich" else p.name, isSelf, stale)
+            if (p.live != null) info += "📡 LIVE"
+            if (p.frozen) info += "🧊 eingefroren"
+            snippet = info.joinToString("\n")
+            val label = (if (isSelf) "Ich" else p.name) + (if (p.live != null) " 📡" else "") + (if (p.frozen) " 🧊" else "")
+            icon = pin(ctx, if (p.live != null && !isSelf) C_LIVE else colorOf(p), label, isSelf, stale)
         }
     }
     // Eigener Marker zuletzt -> liegt oben

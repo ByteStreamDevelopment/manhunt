@@ -12,6 +12,23 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 4. Sobald du auf **Spiel starten** drückst, teilen Runner ihren Standort im eingestellten Intervall. Nach jeweils X Minuten (Standard 15) schlagen die Runner-Handys Alarm, bis ein Foto hochgeladen ist.
 5. Hunter markieren gefangene Runner. Wenn alle gefangen sind oder das Zeitlimit abläuft, endet das Spiel. Danach sehen alle die komplette Route und alle exakten Positionen.
 
+## Accounts, Bestenliste, Galerie
+
+* Mitspielen geht nur mit **Account** (Benutzername, E-Mail, Passwort). Nach der Registrierung kommt ein 6-stelliger **Bestätigungscode per E-Mail**; erst danach kann man sich anmelden. „Passwort vergessen“ funktioniert genauso über einen Code.
+* Ohne eingerichteten SMTP-Server (`SMTP_HOST`) stehen die Codes im Server-Log, und die Spielleitung kann Accounts in `/admin` → „Accounts“ von Hand bestätigen.
+* **Admin-Accounts** sind `ProfImpossible` und `Mrcoolgamer11` (änderbar über `ADMIN_USERNAMES`). Damit niemand diese Namen wegschnappt, lassen sie sich nur mit dem Server-Passwort (`ADMIN_PASSWORD`) als „Admin-Schlüssel“ registrieren. Danach melden sich die beiden in `/admin` mit Benutzername und Passwort an.
+* **Bestenliste** (`/leaderboard`): Punkte für Fänge, Siege, Überlebenszeit, Quests, eingesammelte Fähigkeiten, Fotos und Galerie-Fotos.
+* **Galerie** (`/gallery`): Die Spielleitung wählt in `/admin` → Spiel → „Fotos“ mit ⭐ die besten Fotos aus; sie bleiben mit dem Namen des Fotografen erhalten, auch wenn das Spiel gelöscht wird.
+* In `/admin` → „Galerie“ lassen sich **alle Fotos aller Spiele vom Server löschen** (wahlweise inklusive Galerie).
+
+## Quests, Fähigkeiten, Live-Strafe, Anti-Cheat
+
+* **Live-Strafe:** Schickt ein Runner sein Foto mehr als die Schonfrist (Standard 60 s) zu spät, wird sein Standort **live** (exakt, alle 5 s) an die Hunter geteilt – bis zum Foto der nächsten Runde (oder wahlweise bis zum nächsten Foto).
+* **Quests:** Alle paar Minuten bekommt jeder eine Quest, z. B. *Kurierlauf* (zu einem Punkt laufen), *Einkaufsliste* (zu einem Supermarkt), *Mutprobe* (einem Hunter bis auf 250 m nahe kommen), *Statue* (4 Minuten stillhalten), *Rot sehen* (Foto-Quest); für Hunter *Kopfgeld* (Runner fangen), *Zange* (zu zweit einen Runner einkreisen), *Witterung*, *Patrouille*, *Paparazzi* u. v. m. Belohnung: Punkte und eine Fähigkeit.
+* **Fähigkeiten:** Runner: Freeze (Hunter eingefroren), Tarnkappe, Köder (falsche Position), Nebelwand, Fotojoker, Befreiung. Hunter: Radar (Live-Standort aller Runner), Peilung, Fotobefehl, Spurenleser, Eisbrecher. Beide: Schild. Pro Spiel einstellbar: erlaubt, Anzahl zum Start, im Spiel erhältlich, Dauer.
+* **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
+* **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
+
 ## Features (alle in `/admin` pro Spiel schaltbar)
 
 | Feature | Standard |
@@ -72,11 +89,16 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `ADMIN_PASSWORD` | Passwort für `/admin`. Ohne Angabe wird beim Start ein zufälliges ausgegeben. | zufällig |
 | `PORT` | Port des Servers | 3000 |
 | `HOST` | Adresse, auf der gelauscht wird | 0.0.0.0 |
-| `DATA_DIR` | Ordner für Spielstände (`db.json`) und Fotos | `./data` |
+| `DATA_DIR` | Ordner für Spielstände (`db.json`), Accounts, Fotos und Galerie | `./data` |
+| `ADMIN_USERNAMES` | Accounts mit diesen Namen sind Admins | `ProfImpossible,Mrcoolgamer11` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Mailserver für Bestätigungscodes | – (Codes nur im Log) |
+| `VPN_CHECK` | `ipapi` = IP-Adressen auf VPN/Proxy prüfen | `off` |
+| `OVERPASS_URL` | Overpass-Server für große Orte (Pickups, Quests) | `https://overpass-api.de/api/interpreter` |
+| `ANDROID_CERT_SHA256` | Fingerabdruck der App für App-Links | – |
 
 ## Sicherheit und Datenschutz
 
-* Spieler bekommen beim Beitritt ein zufälliges Token. Wer den Spielcode kennt, kann beitreten. Verschicke den Code also nur an Mitspieler.
+* Mitspielen erfordert einen bestätigten Account. Passwörter werden mit scrypt gehasht, Bestätigungscodes laufen nach 30 Minuten ab und sind auf 5 Versuche begrenzt. Wer den Spielcode kennt und einen Account hat, kann beitreten – verschicke den Code also nur an Mitspieler.
 * Nur die Spielleitung (Passwort) kann Spiele anlegen, steuern und löschen. Falsche Passwörter werden gebremst.
 * Runner sehen vor dem Beitritt, was geteilt wird. Nach dem Spiel kannst du das Spiel in `/admin` mit **Löschen** entfernen, dann verschwinden Positionen und Fotos vom Server.
 * Auch bei aktivierter Verwischung sieht die Spielleitung immer die exakten Positionen.
@@ -84,7 +106,12 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 ## Dateien
 
 ```
-server.js          Server (API, Live-Updates, Sichtbarkeitsregeln)
-public/            Startseite, Spielseite, Admin-Bereich
+server.js          Server (API, Live-Updates, Sichtbarkeitsregeln, Accounts, Quests, Fähigkeiten)
+lib/catalog.js     Alle Fähigkeiten und Quests (Namen, Texte, Standardwerte)
+lib/smtp.js        Mini-SMTP-Client für Bestätigungs-Mails
+lib/geo.js         Entfernungen, große Orte über Overpass
+lib/anticheat.js   VPN- und GPS-Fälschungs-Erkennung
+test/e2e.mjs       End-to-End-Test (npm test)
+public/            Startseite, Spielseite, Admin-Bereich, Bestenliste, Galerie
 Dockerfile, docker-compose.yml, Caddyfile.example, manhunt.service.example
 ```

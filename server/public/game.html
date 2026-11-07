@@ -30,10 +30,12 @@
     <div class="dock">
       <div class="tabs" role="tablist">
         <button role="tab" id="tabbtn-lage" data-tab="lage" aria-selected="true">Lage</button>
+        <button role="tab" id="tabbtn-actions" data-tab="actions" aria-selected="false">Aktionen</button>
         <button role="tab" id="tabbtn-players" data-tab="players" aria-selected="false">Spieler</button>
         <button role="tab" id="tabbtn-photos" data-tab="photos" aria-selected="false">Fotos</button>
       </div>
       <section id="tab-lage" role="tabpanel"></section>
+      <section id="tab-actions" role="tabpanel" hidden></section>
       <section id="tab-players" role="tabpanel" hidden></section>
       <section id="tab-photos" role="tabpanel" hidden></section>
     </div>
@@ -47,6 +49,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/common.js"></script>
+  <script src="/auth.js"></script>
   <script src="/game.js"></script>
 </body>
 </html>

@@ -20,9 +20,18 @@ window.MH = (() => {
     return e;
   }
 
-  async function api(path, { method = 'GET', body, token, contentType } = {}) {
+  /* Account (Anmeldung bleibt auf diesem Gerät gespeichert) */
+  const ACC = 'manhunt:account';
+  const account = {
+    get() { try { return JSON.parse(localStorage.getItem(ACC)); } catch { return null; } },
+    set(v) { if (v) localStorage.setItem(ACC, JSON.stringify(v)); else localStorage.removeItem(ACC); },
+    token() { const a = account.get(); return a && a.token; },
+  };
+
+  async function api(path, { method = 'GET', body, token, contentType, acc } = {}) {
     const headers = {};
     if (token) headers['x-token'] = token;
+    if (acc) headers['x-account'] = acc;
     let payload;
     if (body instanceof Blob) { payload = body; headers['content-type'] = contentType || body.type; }
     else if (body !== undefined) { payload = JSON.stringify(body); headers['content-type'] = 'application/json'; }
@@ -31,7 +40,7 @@ window.MH = (() => {
     catch { const e = new Error('Keine Verbindung zum Server'); e.status = 0; throw e; }
     let data = {};
     try { data = await res.json(); } catch { /* leer */ }
-    if (!res.ok) { const e = new Error(data.error || `Fehler ${res.status}`); e.status = res.status; throw e; }
+    if (!res.ok) { const e = new Error(data.error || `Fehler ${res.status}`); e.status = res.status; e.data = data; throw e; }
     return data;
   }
 
@@ -58,5 +67,5 @@ window.MH = (() => {
     setTimeout(() => t.remove(), ms);
   }
 
-  return { $, h, api, dur, ago, clock, toast };
+  return { $, h, api, dur, ago, clock, toast, account };
 })();

@@ -1,0 +1,24 @@
+{
+  "token": "acc.testid.9999999999999.testsignatur",
+  "account": {
+    "id": "1a9f28ff91c4",
+    "username": "Rita",
+    "email": "rita@x.de",
+    "verified": true,
+    "isAdmin": false,
+    "stats": {
+      "points": 0,
+      "games": 0,
+      "wins": 0,
+      "catches": 0,
+      "caught": 0,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 0,
+      "abilities": 0,
+      "featured": 0,
+      "surviveMin": 0
+    },
+    "createdAt": 1794009627817
+  }
+}

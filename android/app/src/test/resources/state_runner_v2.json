@@ -1,0 +1,420 @@
+{
+  "now": 1794009693549,
+  "game": {
+    "code": "CCYRL",
+    "name": "Fixture",
+    "status": "running",
+    "startedAt": 1794009628408,
+    "endedAt": null,
+    "releaseAt": 1794009628408
+  },
+  "settings": {
+    "locationIntervalSec": 10,
+    "headStartMin": 0,
+    "autoEndAfterMin": 0,
+    "showTrail": true,
+    "fuzzMeters": 0,
+    "huntersVisibleToHunters": true,
+    "huntersVisibleToRunners": false,
+    "runnersVisibleToRunners": true,
+    "showDistance": true,
+    "photosEnabled": true,
+    "photoIntervalMin": 1,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 0,
+    "livePenaltyUntil": "nextRound",
+    "liveIntervalSec": 5,
+    "caughtEnabled": true,
+    "autoEndWhenAllCaught": true,
+    "zoneEnabled": true,
+    "zoneLat": 52.5,
+    "zoneLng": 13.4,
+    "zoneRadiusM": 1500,
+    "abilitiesEnabled": true,
+    "questsEnabled": true,
+    "questIntervalMin": 1,
+    "questMaxActive": 1,
+    "pickupsEnabled": true,
+    "pickupIntervalMin": 1,
+    "pickupMax": 6,
+    "pickupSpacingM": 1000,
+    "pickupCollectM": 40,
+    "pickupLifetimeMin": 30,
+    "pickupSearchM": 3000,
+    "pickupRandomFallback": true,
+    "antiVpn": "warn",
+    "antiSpoof": "warn",
+    "maxSpeedKmh": 45,
+    "abilities": {
+      "freeze": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 90
+      },
+      "cloak": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180
+      },
+      "decoy": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300
+      },
+      "fog": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300
+      },
+      "photoJoker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0
+      },
+      "rescue": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0
+      },
+      "radar": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 180
+      },
+      "ping": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 60
+      },
+      "photoOrder": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 120
+      },
+      "tracker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300
+      },
+      "thaw": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0
+      },
+      "shield": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300
+      }
+    },
+    "quests": {
+      "r_red": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_tourist": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_number": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_safari": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_courier": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_shopping": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_dare": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 90,
+        "reward": "random"
+      },
+      "r_statue": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_edge": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_sprint": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_loot": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_patrol": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_scent": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 70,
+        "reward": "random"
+      },
+      "h_bounty": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 120,
+        "reward": "random"
+      },
+      "h_pincer": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 100,
+        "reward": "random"
+      },
+      "h_chase": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_outpost": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_paparazzi": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 80,
+        "reward": "random"
+      },
+      "h_collector": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_sweep": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 40,
+        "reward": "random"
+      }
+    }
+  },
+  "self": {
+    "id": "28f0eeac",
+    "name": "Rita",
+    "role": "runner",
+    "caught": false,
+    "lastLocTs": 1794009693542,
+    "points": 0,
+    "abilities": [],
+    "quests": [
+      {
+        "id": "e053c72c",
+        "key": "r_loot",
+        "status": "active",
+        "start": 1794009691708,
+        "until": 1794010591708,
+        "target": null,
+        "progress": null
+      }
+    ],
+    "inbox": [
+      {
+        "id": "6d9f5a",
+        "ts": 1794009691709,
+        "text": "⚠️ Foto zu spät – dein Standort ist live, bis du in der nächsten Runde ein Foto hochlädst.",
+        "kind": "bad"
+      },
+      {
+        "id": "cce67f",
+        "ts": 1794009691709,
+        "text": "🎁 Neue Quest: Plünderer – Sammle eine Fähigkeit auf der Karte ein.",
+        "kind": "quest"
+      }
+    ],
+    "frozenUntil": null,
+    "live": "photo",
+    "liveUntil": null,
+    "penalty": {
+      "reason": "photo",
+      "since": 1794009691708
+    },
+    "photoOrderDue": null,
+    "sendIntervalSec": 5
+  },
+  "players": [
+    {
+      "id": "28f0eeac",
+      "name": "Rita",
+      "role": "runner",
+      "caught": false,
+      "hidden": false,
+      "loc": {
+        "lat": 52.50013,
+        "lng": 13.4,
+        "acc": 7,
+        "ts": 1794009693542
+      },
+      "trail": [
+        [
+          52.5,
+          13.4,
+          1794009628431
+        ],
+        [
+          52.50002,
+          13.4,
+          1794009638448
+        ],
+        [
+          52.50004,
+          13.4,
+          1794009648466
+        ],
+        [
+          52.50006,
+          13.4,
+          1794009658482
+        ],
+        [
+          52.50008,
+          13.4,
+          1794009668499
+        ],
+        [
+          52.5001,
+          13.4,
+          1794009678517
+        ],
+        [
+          52.50012,
+          13.4,
+          1794009688534
+        ],
+        [
+          52.50013,
+          13.4,
+          1794009693542
+        ]
+      ],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": "photo",
+      "frozen": false
+    },
+    {
+      "id": "5db5a4aa",
+      "name": "Hans",
+      "role": "hunter",
+      "caught": false,
+      "hidden": true,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": true
+    }
+  ],
+  "photos": [],
+  "messages": [
+    {
+      "id": "f2d5b8",
+      "ts": 1794009628400,
+      "text": "Rita ist als Runner beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "110dc2",
+      "ts": 1794009628404,
+      "text": "Hans ist als Hunter beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "f0d1a7",
+      "ts": 1794009628408,
+      "text": "Das Spiel läuft!",
+      "kind": "system"
+    },
+    {
+      "id": "93cbed",
+      "ts": 1794009691709,
+      "text": "📸 Rita hat kein Foto geschickt – Standort ist jetzt live!",
+      "kind": "system"
+    },
+    {
+      "id": "e0e589",
+      "ts": 1794009693548,
+      "text": "🧊 Ein Runner hat die Hunter eingefroren!",
+      "kind": "system"
+    }
+  ],
+  "effects": [
+    {
+      "id": "bd5b55d9",
+      "key": "freeze",
+      "team": "runner",
+      "byName": "Rita",
+      "at": 1794009693548,
+      "until": 1794009783548,
+      "onMe": false
+    }
+  ],
+  "pickups": [
+    {
+      "id": "658900eb",
+      "lat": 52.503200933798276,
+      "lng": 13.38912212556317,
+      "name": "Versorgungskiste",
+      "kind": "Kiste",
+      "until": 1794011461708
+    }
+  ]
+}
