@@ -1,0 +1,35 @@
+{
+  "sort": "points",
+  "rows": [
+    {
+      "username": "Rita",
+      "isAdmin": false,
+      "points": 107,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "caught": 0,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 1,
+      "abilities": 1,
+      "featured": 1,
+      "surviveMin": 1
+    },
+    {
+      "username": "Hans",
+      "isAdmin": false,
+      "points": 0,
+      "games": 1,
+      "wins": 0,
+      "catches": 0,
+      "caught": 0,
+      "quests": 0,
+      "pickups": 0,
+      "photos": 0,
+      "abilities": 0,
+      "featured": 0,
+      "surviveMin": 0
+    }
+  ]
+}

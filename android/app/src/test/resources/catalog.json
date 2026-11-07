@@ -1,0 +1,436 @@
+{
+  "abilities": {
+    "freeze": {
+      "key": "freeze",
+      "team": "runner",
+      "icon": "🧊",
+      "name": "Freeze",
+      "desc": "Alle Hunter sind eingefroren: Sie sehen keine Runner mehr und können niemanden fangen.",
+      "durationSec": 90,
+      "cooldownSec": 300,
+      "target": null
+    },
+    "cloak": {
+      "key": "cloak",
+      "team": "runner",
+      "icon": "👻",
+      "name": "Tarnkappe",
+      "desc": "Du verschwindest von der Karte der Hunter.",
+      "durationSec": 180,
+      "cooldownSec": 240,
+      "target": null
+    },
+    "decoy": {
+      "key": "decoy",
+      "team": "runner",
+      "icon": "🎭",
+      "name": "Köder",
+      "desc": "Hunter sehen dich an einer falschen Position, 300–600 m entfernt.",
+      "durationSec": 300,
+      "cooldownSec": 240,
+      "target": null
+    },
+    "fog": {
+      "key": "fog",
+      "team": "runner",
+      "icon": "🌫️",
+      "name": "Nebelwand",
+      "desc": "Deine Position wird für Hunter um bis zu 400 m zusätzlich verwischt.",
+      "durationSec": 300,
+      "cooldownSec": 180,
+      "target": null
+    },
+    "photoJoker": {
+      "key": "photoJoker",
+      "team": "runner",
+      "icon": "🃏",
+      "name": "Fotojoker",
+      "desc": "Die aktuelle Foto-Runde gilt als erledigt. Beendet auch einen Live-Standort wegen fehlendem Foto.",
+      "durationSec": 0,
+      "cooldownSec": 0,
+      "target": null
+    },
+    "rescue": {
+      "key": "rescue",
+      "team": "runner",
+      "icon": "🔓",
+      "name": "Befreiung",
+      "desc": "Befreit einen gefangenen Runner, er ist sofort wieder im Spiel.",
+      "durationSec": 0,
+      "cooldownSec": 300,
+      "target": "caughtRunner"
+    },
+    "radar": {
+      "key": "radar",
+      "team": "hunter",
+      "icon": "📡",
+      "name": "Radar",
+      "desc": "Alle Hunter sehen den Live-Standort aller Runner, exakt und alle paar Sekunden aktualisiert.",
+      "durationSec": 180,
+      "cooldownSec": 300,
+      "target": null
+    },
+    "ping": {
+      "key": "ping",
+      "team": "hunter",
+      "icon": "🎯",
+      "name": "Peilung",
+      "desc": "Der nächste Runner muss sofort seinen exakten Standort senden und bleibt eine Minute live.",
+      "durationSec": 60,
+      "cooldownSec": 120,
+      "target": null
+    },
+    "photoOrder": {
+      "key": "photoOrder",
+      "team": "hunter",
+      "icon": "📸",
+      "name": "Fotobefehl",
+      "desc": "Alle Runner müssen innerhalb von 2 Minuten ein Foto hochladen, sonst wird ihr Standort live geteilt.",
+      "durationSec": 120,
+      "cooldownSec": 300,
+      "target": null
+    },
+    "tracker": {
+      "key": "tracker",
+      "team": "hunter",
+      "icon": "🐾",
+      "name": "Spurenleser",
+      "desc": "Hunter sehen die komplette, exakte Route aller Runner.",
+      "durationSec": 300,
+      "cooldownSec": 240,
+      "target": null
+    },
+    "thaw": {
+      "key": "thaw",
+      "team": "hunter",
+      "icon": "🔥",
+      "name": "Eisbrecher",
+      "desc": "Beendet einen Freeze sofort für alle Hunter.",
+      "durationSec": 0,
+      "cooldownSec": 0,
+      "target": null
+    },
+    "shield": {
+      "key": "shield",
+      "team": "any",
+      "icon": "🛡️",
+      "name": "Schild",
+      "desc": "Du bist immun gegen Fähigkeiten des anderen Teams (Freeze, Radar, Peilung, Fotobefehl).",
+      "durationSec": 300,
+      "cooldownSec": 240,
+      "target": null
+    }
+  },
+  "quests": {
+    "r_red": {
+      "key": "r_red",
+      "team": "runner",
+      "kind": "photo",
+      "icon": "🟥",
+      "title": "Rot sehen",
+      "desc": "Fotografiere etwas Rotes, das größer ist als du.",
+      "minutes": 10,
+      "points": 40
+    },
+    "r_tourist": {
+      "key": "r_tourist",
+      "team": "runner",
+      "kind": "photo",
+      "icon": "🗿",
+      "title": "Tourist",
+      "desc": "Mach ein Selfie vor einem Denkmal, Brunnen oder Wahrzeichen.",
+      "minutes": 12,
+      "points": 50
+    },
+    "r_number": {
+      "key": "r_number",
+      "team": "runner",
+      "kind": "photo",
+      "icon": "🔢",
+      "title": "Zahlenjäger",
+      "desc": "Fotografiere eine Hausnummer oder ein Schild mit einer Zahl über 100.",
+      "minutes": 10,
+      "points": 40
+    },
+    "r_safari": {
+      "key": "r_safari",
+      "team": "runner",
+      "kind": "photo",
+      "icon": "🐦",
+      "title": "Safari",
+      "desc": "Fotografiere ein Tier. Tauben und Hunde zählen.",
+      "minutes": 12,
+      "points": 50
+    },
+    "r_courier": {
+      "key": "r_courier",
+      "team": "runner",
+      "kind": "checkpoint",
+      "icon": "📦",
+      "title": "Kurierlauf",
+      "desc": "Bring ein „Paket“ zum markierten Punkt auf der Karte.",
+      "minutes": 12,
+      "points": 60
+    },
+    "r_shopping": {
+      "key": "r_shopping",
+      "team": "runner",
+      "kind": "poi",
+      "icon": "🛒",
+      "title": "Einkaufsliste",
+      "desc": "Lauf zu einem Supermarkt oder Markt in deiner Nähe – die Hunter ahnen nichts.",
+      "minutes": 15,
+      "points": 60
+    },
+    "r_dare": {
+      "key": "r_dare",
+      "team": "runner",
+      "kind": "dare",
+      "icon": "😈",
+      "title": "Mutprobe",
+      "desc": "Komm einem Hunter bis auf 250 m nahe, ohne gefangen zu werden.",
+      "minutes": 10,
+      "points": 90
+    },
+    "r_statue": {
+      "key": "r_statue",
+      "team": "runner",
+      "kind": "still",
+      "icon": "🗽",
+      "title": "Statue",
+      "desc": "Bleib 4 Minuten lang an einem Ort (35 m). Gutes Versteck nötig!",
+      "minutes": 12,
+      "points": 50
+    },
+    "r_edge": {
+      "key": "r_edge",
+      "team": "runner",
+      "kind": "edge",
+      "icon": "🧭",
+      "title": "Grenzgänger",
+      "desc": "Berühre den Rand der Spielzone (bis auf 60 m) – ohne sie zu verlassen.",
+      "minutes": 12,
+      "points": 60
+    },
+    "r_sprint": {
+      "key": "r_sprint",
+      "team": "runner",
+      "kind": "distance",
+      "icon": "💨",
+      "title": "Sprint",
+      "desc": "Leg in 8 Minuten 800 m zurück.",
+      "minutes": 8,
+      "points": 50
+    },
+    "r_loot": {
+      "key": "r_loot",
+      "team": "runner",
+      "kind": "pickup",
+      "icon": "🎁",
+      "title": "Plünderer",
+      "desc": "Sammle eine Fähigkeit auf der Karte ein.",
+      "minutes": 15,
+      "points": 40
+    },
+    "h_patrol": {
+      "key": "h_patrol",
+      "team": "hunter",
+      "kind": "checkpoint",
+      "icon": "🚩",
+      "title": "Patrouille",
+      "desc": "Kontrolliere den markierten Punkt auf der Karte.",
+      "minutes": 10,
+      "points": 50
+    },
+    "h_scent": {
+      "key": "h_scent",
+      "team": "hunter",
+      "kind": "near",
+      "icon": "🐕",
+      "title": "Witterung",
+      "desc": "Komm einem Runner bis auf 150 m nahe.",
+      "minutes": 15,
+      "points": 70
+    },
+    "h_bounty": {
+      "key": "h_bounty",
+      "team": "hunter",
+      "kind": "catch",
+      "icon": "💰",
+      "title": "Kopfgeld",
+      "desc": "Fang innerhalb von 15 Minuten einen Runner.",
+      "minutes": 15,
+      "points": 120
+    },
+    "h_pincer": {
+      "key": "h_pincer",
+      "team": "hunter",
+      "kind": "pincer",
+      "icon": "🦀",
+      "title": "Zange",
+      "desc": "Sei zusammen mit einem zweiten Hunter gleichzeitig höchstens 250 m von einem Runner entfernt.",
+      "minutes": 15,
+      "points": 100
+    },
+    "h_chase": {
+      "key": "h_chase",
+      "team": "hunter",
+      "kind": "distance",
+      "icon": "🏃",
+      "title": "Verfolgungsjagd",
+      "desc": "Leg in 10 Minuten 1 km zurück.",
+      "minutes": 10,
+      "points": 50
+    },
+    "h_outpost": {
+      "key": "h_outpost",
+      "team": "hunter",
+      "kind": "poi",
+      "icon": "🏪",
+      "title": "Stützpunkt",
+      "desc": "Sichere einen Supermarkt, Markt oder Bahnhof in deiner Nähe.",
+      "minutes": 12,
+      "points": 50
+    },
+    "h_paparazzi": {
+      "key": "h_paparazzi",
+      "team": "hunter",
+      "kind": "photo",
+      "icon": "📷",
+      "title": "Paparazzi",
+      "desc": "Fotografiere einen Runner aus der Ferne, ohne dass er es merkt.",
+      "minutes": 15,
+      "points": 80
+    },
+    "h_collector": {
+      "key": "h_collector",
+      "team": "hunter",
+      "kind": "pickup",
+      "icon": "🧲",
+      "title": "Sammler",
+      "desc": "Sammle eine Fähigkeit auf der Karte ein.",
+      "minutes": 15,
+      "points": 40
+    },
+    "h_sweep": {
+      "key": "h_sweep",
+      "team": "hunter",
+      "kind": "checkpoint",
+      "icon": "🧹",
+      "title": "Durchkämmen",
+      "desc": "Durchsuche das Gebiet am markierten Punkt.",
+      "minutes": 8,
+      "points": 40
+    }
+  },
+  "badges": [
+    {
+      "key": "firstGame",
+      "icon": "🎮",
+      "name": "Neuling",
+      "desc": "Erstes Spiel gespielt"
+    },
+    {
+      "key": "veteran",
+      "icon": "🎖️",
+      "name": "Veteran",
+      "desc": "10 Spiele gespielt"
+    },
+    {
+      "key": "firstCatch",
+      "icon": "🪤",
+      "name": "Erster Fang",
+      "desc": "Einen Runner gefangen"
+    },
+    {
+      "key": "bountyHunter",
+      "icon": "🤠",
+      "name": "Kopfgeldjäger",
+      "desc": "10 Runner gefangen"
+    },
+    {
+      "key": "winner",
+      "icon": "🏆",
+      "name": "Sieger",
+      "desc": "Ein Spiel gewonnen"
+    },
+    {
+      "key": "champion",
+      "icon": "👑",
+      "name": "Champion",
+      "desc": "5 Spiele gewonnen"
+    },
+    {
+      "key": "survivor",
+      "icon": "⏱️",
+      "name": "Überlebenskünstler",
+      "desc": "Insgesamt 60 Minuten als Runner überlebt"
+    },
+    {
+      "key": "marathon",
+      "icon": "🏃",
+      "name": "Marathon",
+      "desc": "Insgesamt 5 Stunden als Runner überlebt"
+    },
+    {
+      "key": "ghost",
+      "icon": "👻",
+      "name": "Phantom",
+      "desc": "Als Runner bis zum Ende durchgekommen, ohne je live geortet zu werden"
+    },
+    {
+      "key": "questStarter",
+      "icon": "📜",
+      "name": "Abenteurer",
+      "desc": "5 Quests geschafft"
+    },
+    {
+      "key": "questMaster",
+      "icon": "🧙",
+      "name": "Questmeister",
+      "desc": "25 Quests geschafft"
+    },
+    {
+      "key": "collector",
+      "icon": "🧺",
+      "name": "Sammler",
+      "desc": "10 Fähigkeiten eingesammelt"
+    },
+    {
+      "key": "iceAge",
+      "icon": "🧊",
+      "name": "Eiszeit",
+      "desc": "5-mal Freeze eingesetzt"
+    },
+    {
+      "key": "radarOperator",
+      "icon": "📡",
+      "name": "Funker",
+      "desc": "5-mal Radar eingesetzt"
+    },
+    {
+      "key": "turncoat",
+      "icon": "🔄",
+      "name": "Seitenwechsel",
+      "desc": "Nach dem eigenen Fang als Hunter selbst einen Runner gefangen"
+    },
+    {
+      "key": "photographer",
+      "icon": "📸",
+      "name": "Fotograf",
+      "desc": "Ein Foto in der Galerie der besten Fotos"
+    },
+    {
+      "key": "artist",
+      "icon": "🖼️",
+      "name": "Künstler",
+      "desc": "5 Fotos in der Galerie"
+    },
+    {
+      "key": "chatter",
+      "icon": "💬",
+      "name": "Funkverkehr",
+      "desc": "50 Nachrichten im Team-Chat"
+    }
+  ]
+}

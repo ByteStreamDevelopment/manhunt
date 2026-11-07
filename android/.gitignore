@@ -3,3 +3,8 @@ build/
 app/build/
 out/
 local.properties
+keystore.properties
+*.jks
+*.keystore
+keystore/
+.kotlin/

@@ -1,0 +1,60 @@
+{
+  "username": "Hans",
+  "isAdmin": false,
+  "createdAt": 1794017587650,
+  "stats": {
+    "points": 300,
+    "games": 1,
+    "wins": 1,
+    "catches": 1,
+    "caught": 0,
+    "quests": 0,
+    "pickups": 0,
+    "photos": 0,
+    "abilities": 0,
+    "featured": 0,
+    "surviveMin": 0,
+    "cleanEscapes": 0,
+    "freezes": 0,
+    "radars": 0,
+    "revenge": 0,
+    "chats": 0
+  },
+  "badges": {
+    "firstCatch": 1794017653236,
+    "firstGame": 1794017653237,
+    "winner": 1794017653237
+  },
+  "history": [
+    {
+      "code": "UG4ZY",
+      "name": "Profilspiel",
+      "startedAt": 1794017588127,
+      "endedAt": 1794017653237,
+      "role": "hunter",
+      "converted": false,
+      "caught": false,
+      "result": "win",
+      "points": 300,
+      "catches": 1
+    }
+  ],
+  "seasons": [
+    {
+      "season": "2026-11",
+      "points": 300,
+      "games": 1,
+      "wins": 1,
+      "catches": 1,
+      "quests": 0,
+      "pickups": 0,
+      "surviveMin": 0,
+      "featured": 0,
+      "rank": 1,
+      "of": 2
+    }
+  ],
+  "online": true,
+  "self": false,
+  "friendship": "friends"
+}

@@ -17,9 +17,15 @@ data class Player(
     val outside: Boolean,
     val photoCount: Int,
     val lastPhotoTs: Long?,
+    val points: Int = 0,
+    /** Warum der Spieler gerade live sichtbar ist (photo, order, radar, ping) oder null */
+    val live: String? = null,
+    val frozen: Boolean = false,
+    /** Als Runner gefangen und jetzt Hunter */
+    val converted: Boolean = false,
 )
 
-data class PhotoRef(val id: String, val pid: String, val ts: Long)
+data class PhotoRef(val id: String, val pid: String, val ts: Long, val quest: String? = null)
 data class Msg(val id: String, val ts: Long, val text: String, val kind: String)
 
 data class Settings(
@@ -29,6 +35,9 @@ data class Settings(
     val showTrail: Boolean,
     val fuzzMeters: Int,
     val showDistance: Boolean,
+    val huntersVisibleToHunters: Boolean,
+    val huntersVisibleToRunners: Boolean,
+    val runnersVisibleToRunners: Boolean,
     val photosEnabled: Boolean,
     val photoIntervalMin: Int,
     val caughtEnabled: Boolean,
@@ -36,6 +45,18 @@ data class Settings(
     val zoneLat: Double,
     val zoneLng: Double,
     val zoneRadiusM: Double,
+    val livePenaltyEnabled: Boolean = true,
+    val photoGraceSec: Int = 60,
+    val livePenaltyUntil: String = "nextRound",
+    val liveIntervalSec: Int = 5,
+    val abilitiesEnabled: Boolean = true,
+    val questsEnabled: Boolean = true,
+    val pickupsEnabled: Boolean = true,
+    val pickupCollectM: Int = 40,
+    val supplyDropAbilities: Int = 2,
+    val chatEnabled: Boolean = true,
+    val voiceEnabled: Boolean = true,
+    val spectatorDelaySec: Int = 120,
 )
 
 data class GameInfo(
@@ -47,7 +68,42 @@ data class GameInfo(
     val releaseAt: Long?,
 )
 
-data class SelfInfo(val id: String?, val name: String, val role: String, val caught: Boolean)
+data class AbilityCount(val key: String, val count: Int)
+data class QuestTarget(val lat: Double, val lng: Double, val name: String, val radiusM: Double)
+data class Quest(val id: String, val key: String, val status: String, val start: Long, val until: Long, val target: QuestTarget?, val progress: Int?)
+data class InboxMsg(val id: String, val ts: Long, val text: String, val kind: String)
+data class Effect(val id: String, val key: String, val team: String, val byName: String?, val until: Long, val onMe: Boolean)
+data class Cooldown(val key: String, val until: Long)
+data class VoiceRef(val id: String, val dur: Int, val type: String)
+data class ChatMsg(val id: String, val ts: Long, val pid: String, val name: String, val team: String, val text: String, val voice: VoiceRef?)
+data class Pickup(
+    val id: String, val lat: Double, val lng: Double, val name: String, val until: Long,
+    /** Versorgungsabwurf: mehrere Fähigkeiten, erst ab activeAt einsammelbar */
+    val drop: Boolean = false, val activeAt: Long? = null,
+) {
+    fun landed(serverNow: Long) = !drop || (activeAt ?: 0L) <= serverNow
+}
+
+data class SelfInfo(
+    val id: String?,
+    val name: String,
+    val role: String,
+    val caught: Boolean,
+    val points: Int = 0,
+    val abilities: List<AbilityCount> = emptyList(),
+    val quests: List<Quest> = emptyList(),
+    val inbox: List<InboxMsg> = emptyList(),
+    val frozenUntil: Long? = null,
+    /** Live-Grund (photo, order, radar, ping) oder null */
+    val live: String? = null,
+    val liveUntil: Long? = null,
+    val penalty: String? = null,
+    val photoOrderDue: Long? = null,
+    val sendIntervalSec: Int = 60,
+    val converted: Boolean = false,
+    val cooldowns: List<Cooldown> = emptyList(),
+    val spectatorDelaySec: Int = 0,
+)
 
 data class GameState(
     val now: Long,
@@ -57,6 +113,9 @@ data class GameState(
     val players: List<Player>,
     val photos: List<PhotoRef>,
     val messages: List<Msg>,
+    val effects: List<Effect> = emptyList(),
+    val pickups: List<Pickup> = emptyList(),
+    val chat: List<ChatMsg> = emptyList(),
 )
 
 data class LobbyInfo(
@@ -71,7 +130,115 @@ data class LobbyInfo(
     val headStartMin: Int,
     val fuzzMeters: Int,
     val zoneEnabled: Boolean,
+    val livePenaltyEnabled: Boolean = false,
+    val photoGraceSec: Int = 60,
+    val livePenaltyUntil: String = "nextRound",
+    val abilitiesEnabled: Boolean = false,
+    val questsEnabled: Boolean = false,
+    val pickupsEnabled: Boolean = false,
+    val antiCheat: Boolean = false,
+    val caughtBecomeHunter: Boolean = false,
+    val chatEnabled: Boolean = false,
+    val voiceEnabled: Boolean = false,
+    val spectatorsEnabled: Boolean = false,
+    val spectatorDelaySec: Int = 120,
+    val supplyDropsEnabled: Boolean = false,
+    val supplyDropIntervalMin: Int = 15,
 )
+
+/* ---------------- Accounts, Katalog, Bestenliste, Galerie ---------------- */
+
+data class Account(val token: String, val id: String, val username: String, val email: String, val isAdmin: Boolean)
+
+data class AbilityDef(val key: String, val team: String, val icon: String, val name: String, val desc: String, val durationSec: Int, val target: String?, val cooldownSec: Int = 0)
+data class BadgeDef(val key: String, val icon: String, val name: String, val desc: String)
+data class QuestDef(val key: String, val team: String, val kind: String, val icon: String, val title: String, val desc: String, val minutes: Int, val points: Int)
+data class Catalog(val abilities: Map<String, AbilityDef>, val quests: Map<String, QuestDef>, val badges: Map<String, BadgeDef> = emptyMap()) {
+    fun ability(k: String) = abilities[k] ?: AbilityDef(k, "any", "✨", k, "", 0, null)
+    fun quest(k: String) = quests[k] ?: QuestDef(k, "any", "other", "❓", k, "", 0, 0)
+}
+
+data class BoardRow(
+    val username: String, val isAdmin: Boolean, val points: Int, val games: Int, val wins: Int, val catches: Int,
+    val quests: Int, val pickups: Int, val photos: Int, val featured: Int, val surviveMin: Int,
+    val badges: List<String> = emptyList(),
+)
+
+/* ---------------- Spielleitung (Admin in der App) ---------------- */
+data class AdminGame(
+    val code: String, val name: String, val status: String, val runners: Int, val hunters: Int, val caught: Int,
+    val spectators: Int, val photos: Int, val flagged: List<String>,
+    /** Einstellungen als JSON (zum Bearbeiten in der App) */
+    val settingsJson: String = "{}",
+)
+
+fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").objects().map { g ->
+    AdminGame(
+        g.getString("code"), g.optString("name"), g.optString("status"), g.optInt("runners"), g.optInt("hunters"), g.optInt("caught"),
+        g.optInt("spectators"), g.optInt("photos"),
+        g.optJSONArray("flagged")?.objects()?.map { it.optString("name") } ?: emptyList(),
+        g.optJSONObject("settings")?.toString() ?: "{}",
+    )
+}
+
+/* ---------------- Profil, Saisons, Freunde ---------------- */
+data class HistoryEntry(
+    val code: String, val name: String, val endedAt: Long, val role: String, val converted: Boolean,
+    val caught: Boolean, val result: String, val points: Int, val catches: Int,
+)
+data class SeasonEntry(val season: String, val points: Int, val games: Int, val wins: Int, val catches: Int, val rank: Int?, val of: Int?)
+data class Profile(
+    val username: String, val isAdmin: Boolean, val createdAt: Long, val online: Boolean, val self: Boolean,
+    /** none | requested | incoming | friends | null (nicht angemeldet / eigenes Profil) */
+    val friendship: String?,
+    val stats: Map<String, Int>, val badges: Map<String, Long>, val history: List<HistoryEntry>, val seasons: List<SeasonEntry>,
+)
+data class Friend(val username: String, val online: Boolean, val lastSeen: Long?)
+data class Invite(val id: String, val from: String, val code: String, val gameName: String, val ts: Long)
+data class Friends(val friends: List<Friend>, val incoming: List<Friend>, val outgoing: List<Friend>, val invites: List<Invite>)
+data class Seasons(val current: String, val list: List<String>)
+
+fun parseProfile(j: JSONObject): Profile {
+    val st = j.optJSONObject("stats") ?: JSONObject()
+    val b = j.optJSONObject("badges") ?: JSONObject()
+    return Profile(
+        j.getString("username"), j.optBoolean("isAdmin"), j.optLong("createdAt"), j.optBoolean("online"), j.optBoolean("self"),
+        j.strOrNull("friendship"),
+        st.keys().asSequence().associateWith { st.optInt(it) },
+        b.keys().asSequence().associateWith { b.optLong(it) },
+        j.optJSONArray("history")?.objects()?.map {
+            HistoryEntry(
+                it.optString("code"), it.optString("name"), it.optLong("endedAt"), it.optString("role"), it.optBoolean("converted"),
+                it.optBoolean("caught"), it.optString("result"), it.optInt("points"), it.optInt("catches"),
+            )
+        } ?: emptyList(),
+        j.optJSONArray("seasons")?.objects()?.map {
+            SeasonEntry(
+                it.getString("season"), it.optInt("points"), it.optInt("games"), it.optInt("wins"), it.optInt("catches"),
+                if (it.has("rank")) it.optInt("rank") else null, if (it.has("of")) it.optInt("of") else null,
+            )
+        } ?: emptyList(),
+    )
+}
+
+fun parseFriends(j: JSONObject): Friends {
+    fun list(k: String) = j.optJSONArray(k)?.objects()?.map { Friend(it.getString("username"), it.optBoolean("online"), it.longOrNull("lastSeen")) } ?: emptyList()
+    return Friends(
+        list("friends"), list("incoming"), list("outgoing"),
+        j.optJSONArray("invites")?.objects()?.map { Invite(it.getString("id"), it.optString("from"), it.optString("code"), it.optString("gameName"), it.optLong("ts")) } ?: emptyList(),
+    )
+}
+
+fun parseSeasons(j: JSONObject) = Seasons(j.getString("current"), j.optJSONArray("seasons")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList())
+
+/** "2026-11" -> "November 2026" */
+fun seasonName(k: String): String {
+    val parts = k.split("-")
+    if (parts.size != 2) return k
+    val months = listOf("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
+    return (months.getOrNull((parts[1].toIntOrNull() ?: 1) - 1) ?: parts[1]) + " " + parts[0]
+}
+data class GalleryItem(val id: String, val username: String, val gameName: String, val ts: Long, val caption: String, val quest: String?)
 
 data class Session(val code: String, val token: String, val playerId: String, val name: String, val role: String)
 
@@ -93,7 +260,56 @@ fun parseInfo(j: JSONObject): LobbyInfo {
         headStartMin = s.optInt("headStartMin", 0),
         fuzzMeters = s.optInt("fuzzMeters", 0),
         zoneEnabled = s.optBoolean("zoneEnabled", false),
+        livePenaltyEnabled = s.optBoolean("livePenaltyEnabled", false),
+        photoGraceSec = s.optInt("photoGraceSec", 60),
+        livePenaltyUntil = s.optString("livePenaltyUntil", "nextRound"),
+        abilitiesEnabled = s.optBoolean("abilitiesEnabled", false),
+        questsEnabled = s.optBoolean("questsEnabled", false),
+        pickupsEnabled = s.optBoolean("pickupsEnabled", false),
+        antiCheat = s.optString("antiSpoof", "off") != "off" || s.optString("antiVpn", "off") != "off",
+        caughtBecomeHunter = s.optBoolean("caughtBecomeHunter"),
+        chatEnabled = s.optBoolean("chatEnabled"),
+        voiceEnabled = s.optBoolean("voiceEnabled"),
+        spectatorsEnabled = s.optBoolean("spectatorsEnabled"),
+        spectatorDelaySec = s.optInt("spectatorDelaySec", 120),
+        supplyDropsEnabled = s.optBoolean("supplyDropsEnabled"),
+        supplyDropIntervalMin = s.optInt("supplyDropIntervalMin", 15),
     )
+}
+
+fun parseCatalog(j: JSONObject): Catalog {
+    val a = j.getJSONObject("abilities")
+    val q = j.getJSONObject("quests")
+    return Catalog(
+        abilities = a.keys().asSequence().associateWith { k ->
+            val o = a.getJSONObject(k)
+            AbilityDef(k, o.optString("team"), o.optString("icon"), o.optString("name"), o.optString("desc"), o.optInt("durationSec"), o.strOrNull("target"), o.optInt("cooldownSec"))
+        },
+        quests = q.keys().asSequence().associateWith { k ->
+            val o = q.getJSONObject(k)
+            QuestDef(k, o.optString("team"), o.optString("kind"), o.optString("icon"), o.optString("title"), o.optString("desc"), o.optInt("minutes"), o.optInt("points"))
+        },
+        badges = j.optJSONArray("badges")?.objects()?.associate { b ->
+            b.getString("key") to BadgeDef(b.getString("key"), b.optString("icon"), b.optString("name"), b.optString("desc"))
+        } ?: emptyMap(),
+    )
+}
+
+fun parseAccount(j: JSONObject): Account {
+    val a = j.getJSONObject("account")
+    return Account(j.getString("token"), a.getString("id"), a.getString("username"), a.optString("email"), a.optBoolean("isAdmin"))
+}
+
+fun parseBoard(j: JSONObject): List<BoardRow> = j.getJSONArray("rows").objects().map {
+    BoardRow(
+        it.getString("username"), it.optBoolean("isAdmin"), it.optInt("points"), it.optInt("games"), it.optInt("wins"),
+        it.optInt("catches"), it.optInt("quests"), it.optInt("pickups"), it.optInt("photos"), it.optInt("featured"), it.optInt("surviveMin"),
+        it.optJSONArray("badges")?.let { a -> List(a.length()) { i -> a.getString(i) } } ?: emptyList(),
+    )
+}
+
+fun parseGallery(j: JSONObject): List<GalleryItem> = j.getJSONArray("items").objects().map {
+    GalleryItem(it.getString("id"), it.optString("username"), it.optString("gameName"), it.optLong("ts"), it.optString("caption"), it.strOrNull("quest"))
 }
 
 fun parseState(j: JSONObject): GameState {
@@ -117,6 +333,10 @@ fun parseState(j: JSONObject): GameState {
             outside = p.optBoolean("outside"),
             photoCount = p.optInt("photoCount"),
             lastPhotoTs = p.longOrNull("lastPhotoTs"),
+            points = p.optInt("points"),
+            live = p.strOrNull("live"),
+            frozen = p.optBoolean("frozen"),
+            converted = p.optBoolean("converted"),
         )
     }
     return GameState(
@@ -132,6 +352,9 @@ fun parseState(j: JSONObject): GameState {
             showTrail = s.optBoolean("showTrail", true),
             fuzzMeters = s.optInt("fuzzMeters", 0),
             showDistance = s.optBoolean("showDistance", true),
+            huntersVisibleToHunters = s.optBoolean("huntersVisibleToHunters", true),
+            huntersVisibleToRunners = s.optBoolean("huntersVisibleToRunners", false),
+            runnersVisibleToRunners = s.optBoolean("runnersVisibleToRunners", true),
             photosEnabled = s.optBoolean("photosEnabled", true),
             photoIntervalMin = s.optInt("photoIntervalMin", 15),
             caughtEnabled = s.optBoolean("caughtEnabled", true),
@@ -139,10 +362,114 @@ fun parseState(j: JSONObject): GameState {
             zoneLat = s.optDouble("zoneLat", 0.0),
             zoneLng = s.optDouble("zoneLng", 0.0),
             zoneRadiusM = s.optDouble("zoneRadiusM", 1000.0),
+            livePenaltyEnabled = s.optBoolean("livePenaltyEnabled", false),
+            photoGraceSec = s.optInt("photoGraceSec", 60),
+            livePenaltyUntil = s.optString("livePenaltyUntil", "nextRound"),
+            liveIntervalSec = s.optInt("liveIntervalSec", 5),
+            abilitiesEnabled = s.optBoolean("abilitiesEnabled", false),
+            questsEnabled = s.optBoolean("questsEnabled", false),
+            pickupsEnabled = s.optBoolean("pickupsEnabled", false),
+            pickupCollectM = s.optInt("pickupCollectM", 40),
+            supplyDropAbilities = s.optInt("supplyDropAbilities", 2),
+            chatEnabled = s.optBoolean("chatEnabled", false),
+            voiceEnabled = s.optBoolean("voiceEnabled", false),
+            spectatorDelaySec = s.optInt("spectatorDelaySec", 120),
         ),
-        self = SelfInfo(me.strOrNull("id"), me.optString("name"), me.optString("role"), me.optBoolean("caught")),
+        self = SelfInfo(
+            id = me.strOrNull("id"), name = me.optString("name"), role = me.optString("role"), caught = me.optBoolean("caught"),
+            points = me.optInt("points"),
+            abilities = me.optJSONArray("abilities")?.objects()?.map { AbilityCount(it.getString("key"), it.getInt("count")) } ?: emptyList(),
+            quests = me.optJSONArray("quests")?.objects()?.map { q ->
+                val t = q.optJSONObject("target")
+                Quest(
+                    q.getString("id"), q.getString("key"), q.getString("status"), q.getLong("start"), q.getLong("until"),
+                    t?.let { QuestTarget(it.getDouble("lat"), it.getDouble("lng"), it.optString("name"), it.optDouble("radiusM", 40.0)) },
+                    if (q.has("progress") && !q.isNull("progress")) q.getInt("progress") else null,
+                )
+            } ?: emptyList(),
+            inbox = me.optJSONArray("inbox")?.objects()?.map { InboxMsg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) } ?: emptyList(),
+            frozenUntil = me.longOrNull("frozenUntil"),
+            live = me.strOrNull("live"),
+            liveUntil = me.longOrNull("liveUntil"),
+            penalty = me.optJSONObject("penalty")?.optString("reason"),
+            photoOrderDue = me.longOrNull("photoOrderDue"),
+            sendIntervalSec = me.optInt("sendIntervalSec", s.optInt("locationIntervalSec", 60)),
+            converted = me.optBoolean("converted"),
+            cooldowns = me.optJSONArray("cooldowns")?.objects()?.map { Cooldown(it.getString("key"), it.getLong("until")) } ?: emptyList(),
+            spectatorDelaySec = me.optInt("spectatorDelaySec"),
+        ),
         players = players,
-        photos = j.getJSONArray("photos").objects().map { PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts")) },
+        photos = j.getJSONArray("photos").objects().map { PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts"), it.strOrNull("quest")) },
         messages = j.getJSONArray("messages").objects().map { Msg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) },
+        effects = j.optJSONArray("effects")?.objects()?.map {
+            Effect(it.getString("id"), it.getString("key"), it.optString("team"), it.strOrNull("byName"), it.getLong("until"), it.optBoolean("onMe"))
+        } ?: emptyList(),
+        chat = j.optJSONArray("chat")?.objects()?.map { c ->
+            val v = c.optJSONObject("voice")
+            ChatMsg(
+                c.getString("id"), c.getLong("ts"), c.optString("pid"), c.optString("name"), c.optString("team"), c.optString("text"),
+                v?.let { VoiceRef(it.getString("id"), it.optInt("dur"), it.optString("type")) },
+            )
+        } ?: emptyList(),
+        pickups = j.optJSONArray("pickups")?.objects()?.map {
+            Pickup(it.getString("id"), it.getDouble("lat"), it.getDouble("lng"), it.optString("name"), it.optLong("until"), it.optBoolean("drop"), it.longOrNull("activeAt"))
+        } ?: emptyList(),
     )
 }
+
+/* ------------------------------------------------------------------ */
+/* Abgeleitete Spiellogik (identisch zur Web-Version)                  */
+/* ------------------------------------------------------------------ */
+
+fun GameState.me(): Player? = players.firstOrNull { it.id == self.id }
+
+/** Spielt man mit (Runner/Hunter) oder schaut man nur zu / leitet? */
+fun GameState.isPlayer(): Boolean = self.role == "runner" || self.role == "hunter"
+
+/** Soll das Handy den eigenen Standort an den Server schicken? */
+fun GameState.shouldShare(): Boolean =
+    game.status == "running" && !self.caught && isPlayer() &&
+        (self.role == "runner" || settings.huntersVisibleToHunters || settings.huntersVisibleToRunners)
+
+/** Braucht die App überhaupt GPS (Teilen oder eigene Position/Entfernung anzeigen)? */
+fun GameState.needsGps(): Boolean = game.status == "running" && !self.caught && isPlayer()
+
+data class PhotoDue(val overdue: Boolean, val prevDue: Long, val nextDue: Long)
+
+/**
+ * Foto-Runden laufen fest im Takt ab Spielstart (wie auf der Website):
+ * Runde n beginnt bei startedAt + n * Intervall. Überfällig, wenn seit Beginn der aktuellen Runde noch kein Foto kam.
+ */
+fun GameState.photoDue(serverNow: Long, localLastPhoto: Long = 0L): PhotoDue? {
+    val s = settings
+    if (self.role != "runner" || !s.photosEnabled || game.status != "running" || self.caught) return null
+    val started = game.startedAt ?: return null
+    val iv = s.photoIntervalMin * 60_000L
+    val slot = ((serverNow - started) / iv).coerceAtLeast(0)
+    val prevDue = started + slot * iv
+    val nextDue = prevDue + iv
+    val last = maxOf(me()?.lastPhotoTs ?: 0L, localLastPhoto)
+    return PhotoDue(slot >= 1 && last < prevDue, prevDue, nextDue)
+}
+
+/** Nächste Foto-Runde (für Hunter-Anzeige). */
+fun GameState.nextPhotoRound(serverNow: Long): Long? {
+    val started = game.startedAt ?: return null
+    if (!settings.photosEnabled || game.status != "running") return null
+    val iv = settings.photoIntervalMin * 60_000L
+    return started + (((serverNow - started) / iv).coerceAtLeast(0) + 1) * iv
+}
+
+/** Ist der eigene Hunter gerade eingefroren? */
+fun GameState.frozen(serverNow: Long): Boolean = (self.frozenUntil ?: 0L) > serverNow
+
+fun liveReasonText(r: String?): String? = when (r) {
+    "photo" -> "📡 Foto zu spät – dein Standort wird LIVE geteilt!"
+    "order" -> "📸 Fotobefehl verpasst – dein Standort ist LIVE!"
+    "radar" -> "📡 Radar der Hunter – du bist live sichtbar!"
+    "ping" -> "🎯 Du wurdest angepeilt – live sichtbar!"
+    null -> null
+    else -> "Dein Standort ist live."
+}
+
+fun roleName(r: String) = when (r) { "runner" -> "Runner"; "hunter" -> "Hunter"; "admin" -> "Spielleitung"; "spectator" -> "Zuschauer"; else -> r }

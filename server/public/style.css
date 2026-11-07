@@ -191,3 +191,70 @@ details.card > summary { cursor: pointer; font-family: var(--head); font-weight:
   .dock { overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
+
+/* Formulare: Auswahl */
+select {
+  font: inherit; padding: .5rem .6rem; background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 0; max-width: 100%;
+}
+input[type=email] { width: 100%; font: inherit; padding: .6rem .7rem; background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 0; }
+.field-num.wide { grid-template-columns: 1fr minmax(10rem, 16rem); }
+details.fields.card { margin-bottom: 0; }
+details.fields.card > summary { font-family: var(--head); font-weight: 900; cursor: pointer; }
+
+/* Konfig-Tabellen (Fähigkeiten, Quests) */
+.tablewrap { overflow-x: auto; }
+table.cfg { border-collapse: collapse; width: 100%; font-size: .9rem; }
+table.cfg th, table.cfg td { border-bottom: 2px solid rgba(20,32,26,.15); padding: .4rem .35rem; text-align: left; vertical-align: top; }
+table.cfg th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; }
+table.cfg input[type=number] { width: 5rem; padding: .3rem .4rem; }
+table.cfg input[type=checkbox] { width: 1.3rem; height: 1.3rem; accent-color: var(--ink); }
+table.cfg select { padding: .3rem; font-size: .85rem; }
+table.cfg td:first-child { min-width: 14rem; }
+
+/* Bestenliste */
+table.board { border-collapse: collapse; width: 100%; }
+table.board th, table.board td { padding: .45rem .4rem; border-bottom: 2px solid rgba(20,32,26,.15); text-align: right; font-variant-numeric: tabular-nums; }
+table.board th:nth-child(2), table.board td:nth-child(2) { text-align: left; }
+table.board tr.top1 td { background: var(--gold-soft); font-weight: 800; }
+table.board th button { all: unset; cursor: pointer; text-decoration: underline; }
+
+/* Aktionen im Spiel */
+.abil { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .6rem; }
+.abil button { text-align: left; display: block; width: 100%; font: inherit; padding: .6rem; border: 3px solid var(--ink); background: #fff; cursor: pointer; box-shadow: 3px 3px 0 var(--ink); }
+.abil button b { display: block; }
+.abil button .n { float: right; font-family: var(--mono); }
+.quest { border-left: 6px solid var(--gold); padding-left: .6rem; margin-bottom: .6rem; }
+.quest.done { border-color: var(--runner); opacity: .7; }
+.quest.failed { border-color: #888; opacity: .6; }
+#freeze { position: fixed; inset: 0; z-index: 3000; background: rgba(120,180,230,.92); color: #06243a; display: grid; place-items: center; text-align: center; padding: 2rem; }
+#freeze h1 { font-size: clamp(2rem, 10vw, 4rem); }
+.pickup-pin { font-size: 26px; line-height: 1; filter: drop-shadow(2px 2px 0 #14201a); }
+
+.badges { font-size: 1rem; letter-spacing: .1em; }
+/* Chat */
+.chat { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+.chat li { background: #fff; border: 2px solid var(--ink); padding: .4rem .6rem; max-width: 85%; }
+.chat li.mine { margin-left: auto; background: var(--runner-soft); }
+.chat .who { font-size: .78rem; font-weight: 800; color: var(--muted); }
+.chat audio { width: 100%; max-width: 260px; height: 36px; }
+.chatbar { display: flex; gap: .5rem; margin-top: .6rem; }
+.chatbar input { flex: 1; }
+.btn.rec { background: var(--hunter); }
+.replay { display: grid; gap: .4rem; }
+.replay input[type=range] { width: 100%; accent-color: var(--ink); }
+
+/* Profil */
+.statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem; }
+.statgrid > div { background: #fff; border: 2px solid var(--ink); padding: .4rem; text-align: center; }
+.statgrid b { display: block; font-family: var(--mono); font-size: 1.2rem; }
+.statgrid span { font-size: .75rem; color: var(--muted); }
+.badgegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .5rem; }
+.badgegrid > div { border: 2px solid var(--ink); background: #fff; padding: .5rem; display: grid; gap: .1rem; }
+.badgegrid .bi { font-size: 1.8rem; }
+.badgegrid .missing { opacity: .35; filter: grayscale(1); }
+a.name { text-decoration: none; font-weight: 800; }
+@media (max-width: 480px) { .statgrid { grid-template-columns: repeat(2, 1fr); } }
+
+.pickup-pin.drop { font-size: 32px; animation: dropPulse 1.2s infinite alternate; }
+@keyframes dropPulse { from { transform: scale(1); } to { transform: scale(1.18); } }
+@media (prefers-reduced-motion: reduce) { .pickup-pin.drop { animation: none; } }

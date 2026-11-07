@@ -10,7 +10,7 @@ EnvironmentFile=/opt/manhunt/.env
 Environment=PORT=3000
 Environment=HOST=127.0.0.1
 Environment=DATA_DIR=/var/lib/manhunt
-ExecStart=/usr/bin/node server.js
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

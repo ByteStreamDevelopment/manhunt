@@ -1,0 +1,23 @@
+{
+  "code": "CCYRL",
+  "name": "Fixture",
+  "status": "running",
+  "runners": 1,
+  "hunters": 1,
+  "settings": {
+    "locationIntervalSec": 10,
+    "photosEnabled": true,
+    "photoIntervalMin": 1,
+    "headStartMin": 0,
+    "fuzzMeters": 0,
+    "zoneEnabled": true,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 0,
+    "livePenaltyUntil": "nextRound",
+    "abilitiesEnabled": true,
+    "questsEnabled": true,
+    "pickupsEnabled": true,
+    "antiVpn": "warn",
+    "antiSpoof": "warn"
+  }
+}

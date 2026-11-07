@@ -14,11 +14,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         invite.value = codeFrom(intent)
+        setContent { MhTheme { App(invite.value) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Falls das System den Dienst beendet hat: beim Öffnen der App wieder anwerfen
         if (GameRepository.session.value != null) {
             GameRepository.ensureConnected()
             TrackingService.start(this)
         }
-        setContent { MhTheme { App(invite.value) } }
     }
 
     override fun onNewIntent(intent: Intent) {

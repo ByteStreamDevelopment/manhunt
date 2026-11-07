@@ -1,0 +1,26 @@
+{
+  "friends": [
+    {
+      "username": "Hans",
+      "online": true,
+      "lastSeen": 1794017653247
+    }
+  ],
+  "incoming": [
+    {
+      "username": "Zoe",
+      "online": true,
+      "lastSeen": 1794017653244
+    }
+  ],
+  "outgoing": [],
+  "invites": [
+    {
+      "id": "2t433p6l",
+      "from": "Hans",
+      "code": "LRSM7",
+      "gameName": "Revanche",
+      "ts": 1794017653247
+    }
+  ]
+}

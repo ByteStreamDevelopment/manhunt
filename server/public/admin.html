@@ -5,19 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manhunt – Spielleitung</title>
   <meta name="theme-color" content="#14201a">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Manhunt">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="bar">
     <a class="brand" href="/">Manhunt</a>
-    <span class="title">Spielleitung</span>
+    <span class="title">Spielleitung <span id="who" class="small"></span></span>
     <button class="btn small light" id="logout" hidden>Abmelden</button>
   </header>
   <main class="wrap">
     <section id="login" class="card stack" hidden>
       <h2>Anmelden</h2>
+      <p class="small muted">Mit einem Admin-Account (ProfImpossible, Mrcoolgamer11) oder dem Server-Admin-Passwort.</p>
       <div>
-        <label for="pw">Admin-Passwort</label>
+        <label for="user">Benutzername (leer lassen für Server-Passwort)</label>
+        <input id="user" type="text" autocomplete="username">
+      </div>
+      <div>
+        <label for="pw">Passwort</label>
         <input id="pw" type="password" autocomplete="current-password">
         <p class="err" id="loginErr" role="alert"></p>
       </div>
@@ -25,21 +37,36 @@
     </section>
 
     <section id="dash" hidden>
-      <details class="card" id="newWrap">
-        <summary>Neues Spiel anlegen</summary>
-        <div class="stack" style="margin-top:1rem">
-          <div>
-            <label for="newName">Name des Spiels</label>
-            <input id="newName" type="text" maxlength="40" value="Manhunt">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="games" aria-selected="true">Spiele</button>
+        <button role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
+        <button role="tab" data-tab="gallery" aria-selected="false">Galerie</button>
+      </div>
+
+      <div id="tab-games">
+        <details class="card" id="newWrap">
+          <summary>Neues Spiel anlegen</summary>
+          <div class="stack" style="margin-top:1rem">
+            <div>
+              <label for="newName">Name des Spiels</label>
+              <input id="newName" type="text" maxlength="40" value="Manhunt">
+            </div>
+            <div id="newForm"></div>
+            <p class="err" id="newErr" role="alert"></p>
+            <button class="btn" id="createBtn">Spiel anlegen</button>
           </div>
-          <div id="newForm"></div>
-          <p class="err" id="newErr" role="alert"></p>
-          <button class="btn" id="createBtn">Spiel anlegen</button>
-        </div>
-      </details>
-      <div id="games"></div>
+        </details>
+        <div id="games"></div>
+      </div>
+
+      <div id="tab-accounts" hidden></div>
+      <div id="tab-gallery" hidden></div>
     </section>
   </main>
+  <dialog id="lightbox">
+    <img id="lbImg" alt="">
+    <div class="row between"><span id="lbCap"></span><button class="btn small" id="lbClose">Schließen</button></div>
+  </dialog>
   <script src="/common.js"></script>
   <script src="/admin.js"></script>
 </body>

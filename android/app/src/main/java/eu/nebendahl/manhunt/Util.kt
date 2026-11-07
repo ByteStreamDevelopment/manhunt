@@ -56,7 +56,17 @@ fun bearing(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
 fun compass(deg: Double): String =
     listOf("N", "NO", "O", "SO", "S", "SW", "W", "NW")[(((deg + 22.5) % 360) / 45).toInt()]
 
-fun distText(m: Double): String = if (m < 1000) "${m.roundToInt()} m" else "%.1f km".format(m / 1000)
+fun compassLong(deg: Double): String =
+    listOf("Norden", "Nordosten", "Osten", "Südosten", "Süden", "Südwesten", "Westen", "Nordwesten")[(((deg + 22.5) % 360) / 45).toInt()]
+
+/** Entfernung auf 10 m gerundet (wie auf der Website). */
+fun distTextRounded(m: Double): String =
+    if (m < 1000) "${maxOf(10, (m / 10).roundToInt() * 10)} m" else "%.1f km".format(Locale.GERMANY, m / 1000)
+
+fun fmtInterval(sec: Int): String =
+    if (sec < 120) "$sec Sekunden" else "%s Minuten".format(String.format(Locale.GERMANY, "%.1f", sec / 60.0).removeSuffix(",0"))
+
+fun distText(m: Double): String = if (m < 1000) "${m.roundToInt()} m" else "%.1f km".format(Locale.GERMANY, m / 1000)
 
 /** Foto verkleinern, drehen und als JPEG (max. ~2000 px) für den Upload vorbereiten. */
 fun prepareJpeg(ctx: Context, uri: Uri): ByteArray {

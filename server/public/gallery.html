@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manhunt – Galerie</title>
+  <meta name="theme-color" content="#14201a">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Manhunt">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="bar"><a class="brand" href="/">Manhunt</a><span class="title">Galerie der besten Fotos</span></header>
+  <main class="wrap">
+    <div class="card">
+      <h2>⭐ Die besten Fotos</h2>
+      <p class="small muted">Ausgewählt von der Spielleitung.</p>
+      <div id="grid"><p class="muted">Lade …</p></div>
+    </div>
+  </main>
+  <dialog id="lightbox">
+    <img id="lbImg" alt="">
+    <div class="row between"><span id="lbCap"></span><button class="btn small" id="lbClose">Schließen</button></div>
+  </dialog>
+  <script src="/common.js"></script>
+  <script src="/gallery.js"></script>
+</body>
+</html>

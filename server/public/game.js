@@ -1,6 +1,8 @@
 'use strict';
 (() => {
-  const { $, h, api, dur, ago, clock, toast } = MH;
+  const { $, h, api, dur, ago, clock, toast, account } = MH;
+  let CAT = { abilities: {}, quests: {} };
+  api('/api/catalog').then((c) => { CAT = c; if (S) renderActions(); }).catch(() => {});
 
   const CODE = ((location.pathname.match(/^\/g\/([A-Za-z0-9]+)/) || [])[1] || '').toUpperCase();
   if (!CODE) { location.replace('/'); return; }
@@ -38,7 +40,7 @@
   /* Beitritt                                                         */
   /* ---------------------------------------------------------------- */
   async function showJoin() {
-    const box = $('#joinView'); box.hidden = false;
+    const box = $('#joinView'); box.hidden = false; box.replaceChildren();
     let info;
     try { info = await api(`/api/g/${CODE}/info`); }
     catch (e) {
@@ -47,40 +49,55 @@
     }
     $('#gameName').textContent = info.name;
     if (info.status === 'ended') { box.append(card('', h('h2', {}, info.name), h('p', {}, 'Dieses Spiel ist schon beendet.'), h('a', { class: 'btn', href: '/' }, 'Zur Startseite'))); return; }
+    const acc = account.get();
+    if (!acc) {
+      box.append(h('h1', {}, info.name), h('p', {}, 'Melde dich an, um mitzuspielen. Deine Punkte landen in der Bestenliste.'), MHAuth.box(() => showJoin()));
+      return;
+    }
     const s = info.settings;
     const rules = [
       `Runner teilen ihren Standort alle ${fmtInterval(s.locationIntervalSec)}.`,
       s.photosEnabled && `Runner laden alle ${s.photoIntervalMin} Minuten ein Foto hoch.`,
+      s.photosEnabled && s.livePenaltyEnabled && `Wer ein Foto mehr als ${s.photoGraceSec} Sekunden zu spät schickt, wird live geortet – ${s.livePenaltyUntil === 'upload' ? 'bis zum nächsten Foto' : 'bis zum Foto der nächsten Runde'}.`,
       s.headStartMin > 0 && `Runner haben ${s.headStartMin} Minuten Vorsprung, bevor die Hunter sie sehen.`,
       s.fuzzMeters > 0 && `Hunter sehen die Runner nur ungefähr (bis zu ${s.fuzzMeters} m versetzt).`,
       s.zoneEnabled && 'Es gibt eine Spielzone. Wer sie verlässt, wird gewarnt.',
+      s.questsEnabled && 'Regelmäßig gibt es Quests. Wer sie schafft, bekommt Punkte und Fähigkeiten.',
+      s.abilitiesEnabled && 'Fähigkeiten wie Freeze, Tarnkappe oder Radar kannst du jederzeit einsetzen.',
+      s.pickupsEnabled && 'An großen Orten (z. B. Supermärkten) liegen Fähigkeiten zum Einsammeln.',
+      s.antiSpoof !== 'off' && 'GPS-Fälschungen und VPNs werden erkannt.',
+      s.caughtBecomeHunter && 'Wer gefangen wird, jagt ab dann als Hunter mit.',
+      s.chatEnabled && `Jedes Team hat einen eigenen Chat${s.voiceEnabled ? ' mit Sprachnachrichten' : ''}.`,
     ].filter(Boolean);
-    const nameIn = h('input', { type: 'text', id: 'pname', maxlength: '24', autocomplete: 'nickname', placeholder: 'Dein Spielername' });
     const err = h('p', { class: 'err', role: 'alert' });
     const radio = (val, title, text) => h('label', { class: `choice ${val}` }, h('input', { type: 'radio', name: 'role', value: val }), h('span', {}, h('b', {}, title), text));
     const go = h('button', { class: 'btn big' }, 'Spiel beitreten');
     go.addEventListener('click', async () => {
       err.textContent = '';
       const role = (document.querySelector('input[name=role]:checked') || {}).value;
-      if (!nameIn.value.trim()) { err.textContent = 'Bitte gib einen Namen ein.'; nameIn.focus(); return; }
       if (!role) { err.textContent = 'Bitte wähle eine Rolle.'; return; }
       go.disabled = true;
       try {
-        const r = await api(`/api/g/${CODE}/join`, { method: 'POST', body: { name: nameIn.value, role } });
+        const r = await api(`/api/g/${CODE}/join`, { method: 'POST', acc: acc.token, body: { role } });
         localStorage.setItem(IDKEY, JSON.stringify({ token: r.token, id: r.id, name: r.name, role: r.role }));
         location.reload();
-      } catch (e2) { err.textContent = e2.message; go.disabled = false; }
+      } catch (e2) {
+        if (e2.status === 401) { account.set(null); showJoin(); return; }
+        err.textContent = e2.message; go.disabled = false;
+      }
     });
     box.append(
       h('h1', {}, info.name),
       card('stack',
-        h('div', {}, h('label', { for: 'pname' }, 'Name'), nameIn),
+        h('div', { class: 'row between' }, h('span', {}, 'Du spielst als ', h('b', {}, acc.username)), h('button', { class: 'btn small light', onclick: () => { account.set(null); showJoin(); } }, 'Abmelden')),
         h('div', {}, h('label', {}, 'Rolle'), h('div', { class: 'choices' },
           radio('runner', 'Runner', 'Du wirst gejagt und teilst deinen Standort.'),
           radio('hunter', 'Hunter', 'Du suchst die Runner anhand ihres Standorts.'))),
+        s.spectatorsEnabled && h('label', { class: 'field-bool' }, h('input', { type: 'radio', name: 'role', value: 'spectator' }),
+          h('span', {}, h('b', {}, '👀 Nur zuschauen'), ` – du siehst alles, aber ${s.spectatorDelaySec} Sekunden verzögert.`)),
         err, go),
       card('', h('h3', {}, 'So läuft dieses Spiel'), h('ul', {}, rules.map((r) => h('li', {}, r))),
-        h('p', { class: 'small muted' }, 'Mit dem Beitritt erlaubst du, dass dein Standort und deine Fotos für die Mitspielenden sichtbar sind (Runner) bzw. du die Positionen der Runner siehst (Hunter). Zum Beenden schließt du einfach die Seite.')),
+        h('p', { class: 'small muted' }, 'Mit dem Beitritt erlaubst du, dass dein Standort und deine Fotos für die Mitspielenden sichtbar sind (Runner) bzw. du die Positionen der Runner siehst (Hunter). Tipp: Mit der Android-App läuft das Tracking auch bei gesperrtem Bildschirm.')),
     );
   }
 
@@ -90,15 +107,17 @@
   let S = null, offset = 0;
   const nowMs = () => Date.now() + offset;
   let map, didFit = false;
-  const layers = { markers: new Map(), trails: new Map(), circles: new Map(), self: null, selfAcc: null, zone: null };
+  const layers = { markers: new Map(), trails: new Map(), circles: new Map(), self: null, selfAcc: null, zone: null, extras: [] };
   let lastFix = null, watchId = null, tracking = false, geoErr = '', wakeLock = null, nextSendAt = 0, sending = false;
   let uploading = false, localLastPhoto = 0;
   let audioCtx = null, lastAlarmAt = 0, wasOverdue = false, releaseHandled = false;
   let seenPhotos = null, seenMsg = null, prevStatus = null, prevCaught = null, photoSig = '', bannerSig = '';
-  let refreshing = false, again = false, tab = 'lage';
+  let refreshing = false, again = false, tab = 'lage', seenInbox = null;
+  const seenChat = new Set();
 
   const me = () => S.self;
-  const shouldShare = () => S && S.game.status === 'running' && !S.self.caught && S.self.role !== 'admin'
+  const isPlayer = () => S && (S.self.role === 'runner' || S.self.role === 'hunter');
+  const shouldShare = () => S && S.game.status === 'running' && !S.self.caught && isPlayer()
     && (S.self.role === 'runner' || S.settings.huntersVisibleToHunters || S.settings.huntersVisibleToRunners);
 
   /* --- Ton, Vibration, Bildschirm wach --- */
@@ -144,7 +163,8 @@
     requestWake(); renderLage();
   }
   function freshFix() {
-    if (lastFix && Date.now() - lastFix.ts < 20000) return Promise.resolve(lastFix);
+    const maxAge = S && S.self.live ? 4000 : 20000;
+    if (lastFix && Date.now() - lastFix.ts < maxAge) return Promise.resolve(lastFix);
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition((p) => { onFix(p); resolve(lastFix); }, () => resolve(lastFix && Date.now() - lastFix.ts < 300000 ? lastFix : null), { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
     });
@@ -156,10 +176,11 @@
       const fix = await freshFix();
       if (!fix) { nextSendAt = nowMs() + 10000; return; }
       const r = await api(`/api/g/${CODE}/location`, { method: 'POST', token: TOKEN, body: { lat: fix.lat, lng: fix.lng, acc: fix.acc } });
-      nextSendAt = nowMs() + (r.nextInMs || S.settings.locationIntervalSec * 1000);
+      nextSendAt = nowMs() + (r.nextInMs || (S.self.sendIntervalSec || S.settings.locationIntervalSec) * 1000);
       if (S) renderLage();
     } catch (e) {
-      if (e.status === 401) authLost(); else nextSendAt = nowMs() + 8000;
+      if (e.status === 401) authLost();
+      else { nextSendAt = nowMs() + 8000; if (e.status === 403 || e.status === 409) { geoErr = e.message; renderLage(); } }
     } finally { sending = false; }
   }
 
@@ -220,7 +241,37 @@
       if (!layers.zone) layers.zone = L.circle([s.zoneLat, s.zoneLng], { radius: s.zoneRadiusM, color: '#f2bc0f', weight: 4, dashArray: '10 8', fill: false }).addTo(map);
       else { layers.zone.setLatLng([s.zoneLat, s.zoneLng]); layers.zone.setRadius(s.zoneRadiusM); }
     } else if (layers.zone) { layers.zone.remove(); layers.zone = null; }
+    for (const l of layers.extras) l.remove();
+    layers.extras = [];
+    for (const pu of S.pickups || []) {
+      const icon = L.divIcon({ className: '', html: `<div class="pickup-pin${pu.drop ? ' drop' : ''}">${pu.drop ? '📦' : '🎁'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const mk = L.marker([pu.lat, pu.lng], { icon }).addTo(map).bindPopup(() => pickupPopup(pu));
+      layers.extras.push(mk, L.circle([pu.lat, pu.lng], { radius: S.settings.pickupCollectM, color: '#f2bc0f', weight: 2, fillOpacity: 0.1 }).addTo(map));
+    }
+    for (const q of (S.self.quests || [])) {
+      if (q.status !== 'active' || !q.target) continue;
+      const d = CAT.quests[q.key] || {};
+      const icon = L.divIcon({ className: '', html: `<div class="pickup-pin">${d.icon || '🚩'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      layers.extras.push(L.marker([q.target.lat, q.target.lng], { icon }).addTo(map).bindPopup(`Quest: ${d.title || ''} – ${q.target.name}`),
+        L.circle([q.target.lat, q.target.lng], { radius: q.target.radiusM, color: '#2a62d9', weight: 2, dashArray: '6 6', fillOpacity: 0.05 }).addTo(map));
+    }
     if (!didFit) fitAll(true);
+  }
+  function pickupPopup(pu) {
+    const d = lastFix ? haversine(lastFix.lat, lastFix.lng, pu.lat, pu.lng) : null;
+    const waiting = pu.drop && pu.activeAt && pu.activeAt > nowMs();
+    return h('div', {}, h('strong', {}, `${pu.drop ? '📦' : '🎁'} ${pu.name}`),
+      h('div', {}, pu.drop ? (waiting ? `Versorgungsabwurf – landet in ${dur(pu.activeAt - nowMs())}` : `Versorgungsabwurf mit ${S.settings.supplyDropAbilities} Fähigkeiten!`) : 'Hier liegt eine Fähigkeit.'),
+      d != null ? h('div', {}, `Entfernung: ${fmtDist(d)}`) : null,
+      h('button', { class: 'btn small', onclick: () => collect(pu) }, 'Einsammeln'));
+  }
+  async function collect(pu) {
+    if (!lastFix) { toast('Warte auf GPS …'); return; }
+    try {
+      const r = await api(`/api/g/${CODE}/pickup`, { method: 'POST', token: TOKEN, body: { id: pu.id, lat: lastFix.lat, lng: lastFix.lng, acc: lastFix.acc } });
+      const a = CAT.abilities[r.ability];
+      toast(a ? `Eingesammelt: ${a.icon} ${a.name}` : 'Eingesammelt!', 5000); refresh();
+    } catch (e) { toast(e.message); }
   }
   function updateSelfMarker() {
     if (!map || !lastFix) return;
@@ -266,13 +317,16 @@
     c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
     return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Bild konnte nicht verarbeitet werden'))), 'image/jpeg', quality));
   }
+  let photoQuest = null;
   async function onPhotoChosen(file) {
     if (!file) return;
     uploading = true; renderLage();
+    const q = photoQuest; photoQuest = null;
     try {
       const blob = await shrink(file);
-      await api(`/api/g/${CODE}/photo`, { method: 'POST', token: TOKEN, body: blob, contentType: 'image/jpeg' });
-      localLastPhoto = nowMs(); toast('Foto hochgeladen'); refresh();
+      await api(`/api/g/${CODE}/photo${q ? `?quest=${q}` : ''}`, { method: 'POST', token: TOKEN, body: blob, contentType: 'image/jpeg' });
+      if (me().role === 'runner') localLastPhoto = nowMs();
+      toast(q ? 'Quest-Foto hochgeladen' : 'Foto hochgeladen'); refresh();
     } catch (e) { toast(`Foto-Upload fehlgeschlagen: ${e.message}`, 6000); }
     finally { uploading = false; renderLage(); }
   }
@@ -356,7 +410,12 @@
     if (!S) return;
     const g = S.game, s = S.settings, r = me().role;
     const kids = [statusCard()];
-    if (r !== 'admin' && g.status !== 'ended') kids.push(trackingCard());
+    if (r === 'spectator') kids.push(card('', h('h3', {}, '👀 Du schaust zu'), h('p', {}, `Du siehst alle Positionen exakt, aber ${me().spectatorDelaySec} Sekunden verzögert.`)));
+    if (isPlayer() && g.status !== 'ended') kids.push(trackingCard());
+    if (me().converted && g.status === 'running') kids.push(card('gold', h('h3', {}, '🔄 Seitenwechsel'), h('p', {}, 'Du wurdest gefangen und jagst jetzt als Hunter mit.')));
+    if (g.status === 'ended') kids.push(replayCard());
+    if (isPlayer() && g.status !== 'ended') kids.push(inviteCard());
+    kids.push(MH.pushCard());
     if (r === 'runner' && s.photosEnabled && g.status !== 'ended') kids.push(photoCard());
     if (r === 'hunter' && s.photosEnabled && g.status === 'running') kids.push(hunterPhotoCard());
     if (r === 'hunter' && s.showDistance && g.status === 'running') kids.push(distanceCard());
@@ -369,6 +428,185 @@
     kids.push(messagesCard());
     $('#tab-lage').replaceChildren(...kids.filter(Boolean));
     updateClocks(); updateDistance(); updateGps();
+  }
+  function renderActions() {
+    const el = $('#tab-actions'); if (!el || !S) return;
+    if (me().role === 'admin') { el.replaceChildren(card('', h('p', {}, 'Als Spielleitung siehst du hier nichts. Fähigkeiten verschenken kannst du im Admin-Bereich unter „Spieler“.'))); return; }
+    if (me().role === 'spectator') { el.replaceChildren(card('', h('p', {}, 'Als Zuschauer hast du keine Fähigkeiten und Quests. Aktive Effekte siehst du auf der Karte und in den Meldungen.'))); return; }
+    const g = S.game, sf = S.self;
+    const kids = [];
+    const eff = (S.effects || []).map((e) => {
+      const a = CAT.abilities[e.key] || { icon: '', name: e.key };
+      return h('li', {}, `${a.icon} ${a.name}${e.byName ? ` (${e.byName})` : ''}${e.onMe ? ' – betrifft dich' : ''} · noch `, clk('until', e.until));
+    });
+    if (eff.length) kids.push(card('gold', h('h3', {}, 'Aktive Effekte'), h('ul', {}, eff)));
+    // Fähigkeiten
+    const abil = (sf.abilities || []).map((x) => {
+      const a = CAT.abilities[x.key] || { icon: '?', name: x.key, desc: '' };
+      const cd = (sf.cooldowns || []).find((c) => c.key === x.key);
+      return h('button', { disabled: g.status !== 'running' || sf.caught || (cd && cd.until > nowMs()), onclick: () => useAbility(x.key, a) },
+        h('span', { class: 'n' }, `×${x.count}`), h('b', {}, `${a.icon} ${a.name}`), h('span', { class: 'small muted' }, a.desc),
+        cd && cd.until > nowMs() ? h('div', { class: 'small' }, '⏳ wieder bereit in ', clk('until', cd.until)) : null);
+    });
+    kids.push(card('', h('h3', {}, `Deine Fähigkeiten`), abil.length ? h('div', { class: 'abil' }, abil) : h('p', { class: 'muted' }, 'Keine. Schaff Quests oder sammle Fähigkeiten auf der Karte ein (🎁).')));
+    // Quests
+    const qs = (sf.quests || []).slice().reverse().map((q) => {
+      const d = CAT.quests[q.key] || { icon: '', title: q.key, desc: '' };
+      const extra = [];
+      if (q.status === 'active') {
+        extra.push(h('div', { class: 'small' }, 'Noch ', clk('until', q.until)));
+        if (q.target) extra.push(h('div', { class: 'small' }, `Ziel: ${q.target.name}`, lastFix ? ` · ${fmtDist(haversine(lastFix.lat, lastFix.lng, q.target.lat, q.target.lng))}` : '', ' ',
+          h('button', { class: 'btn small light', onclick: () => map.setView([q.target.lat, q.target.lng], 17) }, 'Auf Karte')));
+        if (q.progress != null && d.kind === 'distance') extra.push(h('div', { class: 'small' }, `Geschafft: ${q.progress} m`));
+        if (q.progress != null && d.kind === 'still') extra.push(h('div', { class: 'small' }, `Stillgehalten: ${Math.floor(q.progress / 60)}:${String(q.progress % 60).padStart(2, '0')}`));
+        if (d.kind === 'photo') extra.push(h('button', { class: 'btn small', disabled: uploading, onclick: () => { photoQuest = q.id; $('#photoInput').click(); } }, '📷 Quest-Foto aufnehmen'));
+      }
+      return h('div', { class: `quest ${q.status}` }, h('b', {}, `${d.icon} ${d.title}`, q.status === 'done' ? ' ✅' : q.status === 'failed' ? ' ⌛' : '', ` · ${d.points} P`), h('div', { class: 'small' }, d.desc), ...extra);
+    });
+    if (S.settings.questsEnabled) kids.push(card('', h('h3', {}, 'Quests'), qs.length ? qs : h('p', { class: 'muted' }, g.status === 'running' ? 'Die nächste Quest kommt bald.' : 'Quests gibt es, sobald das Spiel läuft.')));
+    // Pickups
+    const pus = (S.pickups || []).map((pu) => ({ pu, d: lastFix ? haversine(lastFix.lat, lastFix.lng, pu.lat, pu.lng) : null })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9));
+    if (pus.length) kids.push(card('', h('h3', {}, '🎁 Fähigkeiten zum Einsammeln'), h('ul', { class: 'plist' }, pus.slice(0, 8).map(({ pu, d }) => h('li', {},
+      h('div', { class: 'grow' }, h('div', { class: 'name' }, `${pu.drop ? '📦 ' : ''}${pu.name}`), h('div', { class: 'small muted' }, d != null ? fmtDist(d) : 'Entfernung unbekannt',
+        pu.drop && pu.activeAt > nowMs() ? h('span', {}, ' · landet in ', clk('until', pu.activeAt)) : null)),
+      h('button', { class: 'btn small light', onclick: () => map.setView([pu.lat, pu.lng], 17) }, 'Karte'),
+      h('button', { class: 'btn small', onclick: () => collect(pu) }, 'Einsammeln'))))));
+    kids.push(card('', h('p', {}, `Deine Punkte in diesem Spiel: `, h('b', {}, String(sf.points || 0))), h('a', { class: 'btn small light', href: '/leaderboard' }, '🏆 Bestenliste')));
+    el.replaceChildren(...kids);
+    updateClocks();
+  }
+  async function useAbility(key, a) {
+    let targetId;
+    if (a.target === 'caughtRunner') {
+      const caught = S.players.filter((p) => p.role === 'runner' && p.caught);
+      if (!caught.length) { toast('Gerade ist kein Runner gefangen.'); return; }
+      const name = prompt(`Wen befreien? ${caught.map((p) => p.name).join(', ')}`, caught[0].name);
+      const t = caught.find((p) => p.name.toLowerCase() === String(name || '').toLowerCase());
+      if (!t) return;
+      targetId = t.id;
+    } else if (!confirm(`${a.icon} ${a.name} jetzt einsetzen?\n${a.desc}`)) return;
+    try { await api(`/api/g/${CODE}/ability`, { method: 'POST', token: TOKEN, body: { key, targetId } }); toast(`${a.icon} ${a.name} eingesetzt!`); refresh(); }
+    catch (e) { toast(e.message); }
+  }
+  /* ---------------- Team-Chat mit Sprachnachrichten ---------------- */
+  let chatSig = '', recorder = null, recChunks = [], recStart = 0;
+  function renderChat(force) {
+    const el = $('#tab-chat'); if (!el || !S) return;
+    const list = S.chat || [];
+    const sig = list.map((c) => c.id).join(',');
+    if (!force && sig === chatSig && el.childElementCount) return;
+    chatSig = sig;
+    const team = { runner: 'Runner', hunter: 'Hunter', spectator: 'Zuschauer', admin: 'alle Teams' }[me().role] || '';
+    const items = list.map((c) => h('li', { class: c.pid === me().id ? 'mine' : '' },
+      h('div', { class: 'who' }, `${c.name}${me().role === 'admin' ? ` (${c.team})` : ''} · ${clock(c.ts)}`),
+      c.voice ? h('audio', { controls: true, preload: 'none', src: `/api/g/${CODE}/chat/voice/${c.voice.id}?t=${encodeURIComponent(TOKEN)}` }) : h('div', {}, c.text)));
+    const input = h('input', { type: 'text', maxlength: '300', placeholder: 'Nachricht ans Team …' });
+    const send = async () => {
+      const t = input.value.trim(); if (!t) return;
+      try { await api(`/api/g/${CODE}/chat`, { method: 'POST', token: TOKEN, body: { text: t } }); input.value = ''; refresh(); }
+      catch (e) { toast(e.message); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    const canWrite = me().role !== 'admin' && S.settings.chatEnabled;
+    const rec = h('button', { class: 'btn rec', title: 'Gedrückt halten zum Sprechen' }, '🎙️');
+    const startRec = async (e) => {
+      e.preventDefault();
+      if (recorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg'].find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+        recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
+        recChunks = []; recStart = Date.now();
+        recorder.ondataavailable = (ev) => recChunks.push(ev.data);
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(recChunks, { type: (recorder.mimeType || 'audio/webm').split(';')[0] });
+          const dur = Math.round((Date.now() - recStart) / 1000);
+          recorder = null; rec.textContent = '🎙️';
+          if (dur < 1) { toast('Zu kurz – gedrückt halten'); return; }
+          try { await api(`/api/g/${CODE}/chat/voice?dur=${dur}`, { method: 'POST', token: TOKEN, body: blob, contentType: blob.type }); refresh(); }
+          catch (x) { toast(x.message); }
+        };
+        recorder.start();
+        rec.textContent = '⏺️';
+        setTimeout(() => { if (recorder && recorder.state === 'recording') recorder.stop(); }, 30000);
+      } catch { toast('Kein Mikrofon-Zugriff'); }
+    };
+    const stopRec = () => { if (recorder && recorder.state === 'recording') recorder.stop(); };
+    rec.addEventListener('pointerdown', startRec);
+    rec.addEventListener('pointerup', stopRec);
+    rec.addEventListener('pointerleave', stopRec);
+    el.replaceChildren(card('',
+      h('h3', {}, `💬 Team-Chat (${team})`),
+      items.length ? h('ul', { class: 'chat' }, items) : h('p', { class: 'muted' }, 'Noch keine Nachrichten. Nur dein Team kann mitlesen.'),
+      canWrite ? h('div', { class: 'chatbar' }, input, h('button', { class: 'btn', onclick: send }, 'Senden'), S.settings.voiceEnabled ? rec : null) : null));
+  }
+
+  /* ---------------- Freunde einladen ---------------- */
+  let friendsCache = null, friendsAt = 0;
+  function inviteCard() {
+    const acc = account.get();
+    if (!acc) return null;
+    const box = h('div', { class: 'card stack' }, h('h3', {}, '👥 Freunde einladen'));
+    const fill = (f) => {
+      const list = f.friends;
+      box.append(list.length ? h('ul', { class: 'plist' }, list.map((x) => h('li', {},
+        h('span', {}, x.online ? '🟢' : '⚪'), h('span', { class: 'grow name' }, x.username),
+        h('button', { class: 'btn small light', onclick: async (e) => {
+          try { await api('/api/friends/invite', { method: 'POST', acc: acc.token, body: { username: x.username, code: CODE } }); e.target.textContent = '✔ Eingeladen'; e.target.disabled = true; }
+          catch (x2) { toast(x2.message); }
+        } }, 'Einladen')))) : h('p', { class: 'small muted' }, 'Noch keine Freunde – füge welche in deinem ', h('a', { href: '/profile' }, 'Profil'), ' hinzu.'));
+    };
+    if (friendsCache && Date.now() - friendsAt < 60000) fill(friendsCache);
+    else api('/api/friends', { acc: acc.token }).then((f) => { friendsCache = f; friendsAt = Date.now(); fill(f); }).catch(() => box.remove());
+    return box;
+  }
+
+  /* ---------------- Wiederholung nach Spielende ---------------- */
+  let replayTimer = null, replayLayers = [];
+  function replayCard() {
+    const g = S.game;
+    if (!g.startedAt || !g.endedAt) return null;
+    const slider = h('input', { type: 'range', min: String(g.startedAt), max: String(g.endedAt), value: String(g.endedAt), step: '1000' });
+    const lbl = h('span', { class: 'mono' }, dur(g.endedAt - g.startedAt));
+    const draw = (t) => {
+      for (const l of replayLayers) l.remove();
+      replayLayers = [];
+      lbl.textContent = dur(t - g.startedAt);
+      for (const p of S.players) {
+        const pts = (p.trail || []).filter((x) => x[2] <= t);
+        if (!pts.length) continue;
+        const color = p.role === 'runner' ? '#0f8a4a' : p.converted ? '#8a3a0f' : '#c7301f';
+        replayLayers.push(L.polyline(pts.map((x) => [x[0], x[1]]), { color, weight: 4, opacity: 0.85 }).addTo(map));
+        const last = pts[pts.length - 1];
+        replayLayers.push(L.circleMarker([last[0], last[1]], { radius: 7, color: '#14201a', weight: 2, fillColor: color, fillOpacity: 1 }).bindTooltip(p.name, { permanent: true, direction: 'top' }).addTo(map));
+      }
+    };
+    const stopPlay = () => { if (replayTimer) clearInterval(replayTimer); replayTimer = null; };
+    slider.addEventListener('input', () => { stopPlay(); hideLive(true); draw(Number(slider.value)); });
+    const play = h('button', { class: 'btn', onclick: () => {
+      stopPlay(); hideLive(true);
+      let t = g.startedAt;
+      const step = Math.max(1000, (g.endedAt - g.startedAt) / 300); // ca. 30 Sekunden Abspieldauer
+      replayTimer = setInterval(() => { t = Math.min(g.endedAt, t + step); slider.value = String(t); draw(t); if (t >= g.endedAt) stopPlay(); }, 100);
+    } }, '▶️ Abspielen');
+    const back = h('button', { class: 'btn light', onclick: () => { stopPlay(); for (const l of replayLayers) l.remove(); replayLayers = []; hideLive(false); } }, 'Live-Ansicht');
+    return card('stack', h('h3', {}, '🎬 Wiederholung'), h('p', { class: 'small muted' }, 'Spiel das ganze Spiel noch einmal auf der Karte ab.'),
+      h('div', { class: 'replay' }, slider, h('div', { class: 'row between' }, lbl, h('div', { class: 'row' }, play, back))));
+  }
+  function hideLive(hide) {
+    for (const coll of [layers.markers, layers.trails, layers.circles]) for (const l of coll.values()) { if (hide) l.remove(); else l.addTo(map); }
+  }
+
+  function renderFreeze() {
+    let ov = $('#freeze');
+    const until = S && S.self.frozenUntil;
+    if (until && until > nowMs()) {
+      if (!ov) { ov = h('div', { id: 'freeze' }); document.body.append(ov); }
+      ov.replaceChildren(h('div', {}, h('h1', {}, '🧊 Eingefroren!'), h('p', {}, 'Ein Runner hat dich eingefroren. Du siehst keine Runner und kannst niemanden fangen.'),
+        h('div', { class: 'big-clock' }, dur(until - nowMs())),
+        (S.self.abilities || []).some((x) => x.key === 'thaw') ? h('button', { class: 'btn big', onclick: () => useAbility('thaw', CAT.abilities.thaw || { icon: '🔥', name: 'Eisbrecher', desc: '' }) }, '🔥 Eisbrecher einsetzen') : null));
+    } else if (ov) ov.remove();
   }
   async function setCaught(pid, caught) {
     try { await api(`/api/g/${CODE}/caught`, { method: 'POST', token: TOKEN, body: { playerId: pid, caught } }); refresh(); }
@@ -439,6 +677,9 @@
     if (g.status === 'running' && r === 'runner' && !me().caught && s.zoneEnabled && lastFix && haversine(lastFix.lat, lastFix.lng, s.zoneLat, s.zoneLng) > s.zoneRadiusM) a.push({ bad: true, text: 'Du bist außerhalb der Spielzone!' });
     const ps = photoState();
     if (ps && ps.overdue) a.push({ bad: false, text: 'Foto fällig! Tippe im Tab „Lage“ auf „Foto aufnehmen“.' });
+    const live = S.self.live;
+    if (live) a.push({ bad: true, text: { photo: '📡 Foto zu spät – dein Standort wird LIVE geteilt!', order: '📸 Fotobefehl verpasst – dein Standort ist LIVE!', radar: '📡 Radar der Hunter – du bist live sichtbar!', ping: '🎯 Du wurdest angepeilt – live sichtbar!' }[live] || 'Dein Standort ist live.' });
+    if (S.self.photoOrderDue && S.self.photoOrderDue > nowMs()) a.push({ bad: true, text: `📸 Fotobefehl! Noch ${dur(S.self.photoOrderDue - nowMs())} für ein Foto.` });
     return a;
   }
   function updateBanner() {
@@ -454,7 +695,7 @@
   }
   function tick() {
     if (!S) return;
-    updateClocks(); updateGps(); updateDistance(); checkPhotoAlarm(); updateBanner();
+    updateClocks(); updateGps(); updateDistance(); checkPhotoAlarm(); updateBanner(); renderFreeze();
     if (!releaseHandled && S.game.status === 'running' && S.game.releaseAt && nowMs() >= S.game.releaseAt) { releaseHandled = true; refresh(); }
     maybeSend();
   }
@@ -497,13 +738,19 @@
       if (g.status === 'ended') buzz([500, 150, 500]);
       if (g.status === 'lobby') { seenPhotos = new Set(); photoSig = ''; localLastPhoto = 0; }
     }
-    if (prev && prev.settings.locationIntervalSec !== S.settings.locationIntervalSec) nextSendAt = 0;
+    if (prev && (prev.settings.locationIntervalSec !== S.settings.locationIntervalSec || prev.self.live !== S.self.live)) nextSendAt = 0;
+    if (seenInbox === null) seenInbox = new Set((S.self.inbox || []).map((m) => m.id));
+    else for (const m of S.self.inbox || []) if (!seenInbox.has(m.id)) { seenInbox.add(m.id); toast(m.text, 6000); buzz(m.kind === 'bad' ? [400, 150, 400] : [150]); }
     if (g.status === 'running' && !prev) releaseHandled = !(g.releaseAt && nowMs() < g.releaseAt);
     if (prev && prevCaught === false && me().caught) buzz([600]);
     prevCaught = me().caught;
 
     if (!map) { initMap(); if (r !== 'admin' && !tracking) autoStart(); }
-    updateMap(); renderLage(); renderPlayers(); renderPhotos(); updateBanner();
+    updateMap(); renderLage(); renderPlayers(); renderPhotos(); renderActions(); renderChat(); renderFreeze(); updateBanner();
+    const newChat = (S.chat || []).filter((c) => c.pid !== me().id && !seenChat.has(c.id));
+    if (seenChat.size || !prev) for (const c of newChat) if (prev && tab !== 'chat') toast(`💬 ${c.name}: ${c.voice ? '🎙️ Sprachnachricht' : c.text}`, 5000);
+    for (const c of S.chat || []) seenChat.add(c.id);
+    $('#tabbtn-chat').textContent = newChat.length && tab !== 'chat' && prev ? `Chat (${newChat.length})` : 'Chat';
   }
   async function autoStart() {
     try {
@@ -539,6 +786,7 @@
       $(`#tab-${b.dataset.tab}`).hidden = !on;
     }
     if (name === 'photos') { photoSig = ''; if (S) renderPhotos(); }
+    if (name === 'chat' && S) { $('#tabbtn-chat').textContent = 'Chat'; renderChat(true); }
   }
 
   if (TOKEN) startApp(); else showJoin();

@@ -1,7 +1,27 @@
 'use strict';
 (() => {
-  const { $, h, api } = MH;
+  const { $, h, api, account, pushCard } = MH;
   const input = $('#code'), err = $('#err');
+
+  function render() {
+    const acc = account.get();
+    $('#joinCard').hidden = !acc;
+    $('#authSlot').replaceChildren(acc ? '' : MHAuth.box(render));
+    if (acc) $('#accName').textContent = acc.username;
+    $('#profileLink').hidden = !acc;
+    $('#pushSlot').replaceChildren(acc ? pushCard() || '' : '');
+    $('#invites').replaceChildren();
+    if (acc) {
+      api('/api/friends', { acc: acc.token }).then((f) => {
+        const kids = [];
+        if (f.invites.length) kids.push(h('div', { class: 'card gold stack' }, h('h3', {}, '🎮 Einladungen'), h('ul', { class: 'plist' }, f.invites.map((i) => h('li', {},
+          h('div', { class: 'grow' }, h('b', {}, i.gameName), h('div', { class: 'small' }, `von ${i.from}`)), h('a', { class: 'btn small', href: `/g/${i.code}` }, 'Beitreten'))))));
+        if (f.incoming.length) kids.push(h('div', { class: 'card stack' }, h('p', {}, `👥 ${f.incoming.length} Freundschaftsanfrage(n)`), h('a', { class: 'btn small', href: '/profile' }, 'Ansehen')));
+        $('#invites').replaceChildren(...kids);
+      }).catch((e) => { if (e.status === 401) { account.set(null); render(); } });
+    }
+  }
+  $('#logoutBtn').addEventListener('click', () => { account.set(null); render(); });
 
   async function go() {
     const code = input.value.trim().toUpperCase();
@@ -17,7 +37,7 @@
   const items = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k.startsWith('manhunt:') || k === 'manhunt:admin') continue;
+    if (!/^manhunt:[A-Z0-9]{3,10}$/.test(k)) continue;
     try { const v = JSON.parse(localStorage.getItem(k)); items.push({ code: k.slice(8), ...v }); } catch { /* ignorieren */ }
   }
   if (items.length) {
@@ -28,4 +48,5 @@
       h('a', { class: 'btn small light', href: `/g/${it.code}` }, 'Öffnen'),
     )));
   }
+  render();
 })();

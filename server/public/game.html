@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manhunt</title>
   <meta name="theme-color" content="#14201a">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Manhunt">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -30,12 +37,16 @@
     <div class="dock">
       <div class="tabs" role="tablist">
         <button role="tab" id="tabbtn-lage" data-tab="lage" aria-selected="true">Lage</button>
+        <button role="tab" id="tabbtn-actions" data-tab="actions" aria-selected="false">Aktionen</button>
         <button role="tab" id="tabbtn-players" data-tab="players" aria-selected="false">Spieler</button>
         <button role="tab" id="tabbtn-photos" data-tab="photos" aria-selected="false">Fotos</button>
+        <button role="tab" id="tabbtn-chat" data-tab="chat" aria-selected="false">Chat</button>
       </div>
       <section id="tab-lage" role="tabpanel"></section>
+      <section id="tab-actions" role="tabpanel" hidden></section>
       <section id="tab-players" role="tabpanel" hidden></section>
       <section id="tab-photos" role="tabpanel" hidden></section>
+      <section id="tab-chat" role="tabpanel" hidden></section>
     </div>
   </div>
 
@@ -47,6 +58,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/common.js"></script>
+  <script src="/auth.js"></script>
   <script src="/game.js"></script>
 </body>
 </html>

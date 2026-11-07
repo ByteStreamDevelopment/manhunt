@@ -1,0 +1,367 @@
+{
+  "now": 1794017653218,
+  "game": {
+    "code": "UG4ZY",
+    "name": "Profilspiel",
+    "status": "running",
+    "startedAt": 1794017588127,
+    "endedAt": null,
+    "releaseAt": 1794017588127
+  },
+  "settings": {
+    "locationIntervalSec": 60,
+    "headStartMin": 0,
+    "autoEndAfterMin": 0,
+    "showTrail": true,
+    "fuzzMeters": 0,
+    "huntersVisibleToHunters": true,
+    "huntersVisibleToRunners": false,
+    "runnersVisibleToRunners": true,
+    "showDistance": true,
+    "photosEnabled": true,
+    "photoIntervalMin": 15,
+    "livePenaltyEnabled": true,
+    "photoGraceSec": 60,
+    "livePenaltyUntil": "nextRound",
+    "liveIntervalSec": 5,
+    "caughtEnabled": true,
+    "caughtBecomeHunter": true,
+    "freezeImmunitySec": 120,
+    "chatEnabled": true,
+    "voiceEnabled": true,
+    "spectatorsEnabled": true,
+    "spectatorDelaySec": 120,
+    "autoEndWhenAllCaught": true,
+    "zoneEnabled": true,
+    "zoneLat": 52.5,
+    "zoneLng": 13.4,
+    "zoneRadiusM": 800,
+    "abilitiesEnabled": true,
+    "questsEnabled": false,
+    "questIntervalMin": 8,
+    "questMaxActive": 1,
+    "pickupsEnabled": false,
+    "pickupIntervalMin": 4,
+    "pickupMax": 6,
+    "pickupSpacingM": 1000,
+    "pickupCollectM": 40,
+    "pickupLifetimeMin": 30,
+    "pickupSearchM": 3000,
+    "pickupRandomFallback": true,
+    "supplyDropsEnabled": true,
+    "supplyDropIntervalMin": 1,
+    "supplyDropWarnMin": 5,
+    "supplyDropAbilities": 2,
+    "antiVpn": "warn",
+    "antiSpoof": "warn",
+    "maxSpeedKmh": 45,
+    "abilities": {
+      "freeze": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 90,
+        "cooldownSec": 300
+      },
+      "cloak": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 240
+      },
+      "decoy": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      },
+      "fog": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 180
+      },
+      "photoJoker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "rescue": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 300
+      },
+      "radar": {
+        "enabled": true,
+        "start": 1,
+        "obtainable": true,
+        "durationSec": 180,
+        "cooldownSec": 300
+      },
+      "ping": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 60,
+        "cooldownSec": 120
+      },
+      "photoOrder": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 120,
+        "cooldownSec": 300
+      },
+      "tracker": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      },
+      "thaw": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 0,
+        "cooldownSec": 0
+      },
+      "shield": {
+        "enabled": true,
+        "start": 0,
+        "obtainable": true,
+        "durationSec": 300,
+        "cooldownSec": 240
+      }
+    },
+    "quests": {
+      "r_red": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_tourist": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_number": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 40,
+        "reward": "random"
+      },
+      "r_safari": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_courier": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_shopping": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_dare": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 90,
+        "reward": "random"
+      },
+      "r_statue": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_edge": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 60,
+        "reward": "random"
+      },
+      "r_sprint": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 50,
+        "reward": "random"
+      },
+      "r_loot": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_patrol": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_scent": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 70,
+        "reward": "random"
+      },
+      "h_bounty": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 120,
+        "reward": "random"
+      },
+      "h_pincer": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 100,
+        "reward": "random"
+      },
+      "h_chase": {
+        "enabled": true,
+        "minutes": 10,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_outpost": {
+        "enabled": true,
+        "minutes": 12,
+        "points": 50,
+        "reward": "random"
+      },
+      "h_paparazzi": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 80,
+        "reward": "random"
+      },
+      "h_collector": {
+        "enabled": true,
+        "minutes": 15,
+        "points": 40,
+        "reward": "random"
+      },
+      "h_sweep": {
+        "enabled": true,
+        "minutes": 8,
+        "points": 40,
+        "reward": "random"
+      }
+    }
+  },
+  "self": {
+    "id": "cb3b8d40",
+    "name": "Rita",
+    "role": "runner",
+    "caught": false,
+    "lastLocTs": null,
+    "points": 0,
+    "abilities": [
+      {
+        "key": "freeze",
+        "count": 1
+      }
+    ],
+    "quests": [],
+    "inbox": [],
+    "frozenUntil": null,
+    "live": null,
+    "liveUntil": null,
+    "penalty": null,
+    "photoOrderDue": null,
+    "sendIntervalSec": 60,
+    "converted": false,
+    "cooldowns": [],
+    "spectatorDelaySec": 0
+  },
+  "players": [
+    {
+      "id": "cb3b8d40",
+      "name": "Rita",
+      "role": "runner",
+      "caught": false,
+      "hidden": false,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": false
+    },
+    {
+      "id": "a83b6ff4",
+      "name": "Hans",
+      "role": "hunter",
+      "caught": false,
+      "hidden": true,
+      "loc": null,
+      "trail": [],
+      "outside": false,
+      "photoCount": 0,
+      "lastPhotoTs": null,
+      "points": 0,
+      "live": null,
+      "frozen": false,
+      "converted": false
+    }
+  ],
+  "photos": [],
+  "messages": [
+    {
+      "id": "b4f372",
+      "ts": 1794017588123,
+      "text": "Rita ist als Runner beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "beccda",
+      "ts": 1794017588126,
+      "text": "Hans ist als Hunter beigetreten.",
+      "kind": "system"
+    },
+    {
+      "id": "5ef526",
+      "ts": 1794017588128,
+      "text": "Das Spiel läuft!",
+      "kind": "system"
+    },
+    {
+      "id": "15e944",
+      "ts": 1794017651381,
+      "text": "📦 Versorgungsabwurf in 5 Minuten bei „Abwurfzone“ – mit 2 Fähigkeiten!",
+      "kind": "system"
+    }
+  ],
+  "effects": [],
+  "chat": [],
+  "pickups": [
+    {
+      "id": "4d00699b",
+      "lat": 52.4948480380959,
+      "lng": 13.401385639765204,
+      "name": "Abwurfzone",
+      "kind": "Abwurf",
+      "until": 1794019751381,
+      "drop": true,
+      "activeAt": 1794017951381
+    }
+  ]
+}

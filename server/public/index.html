@@ -5,15 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manhunt</title>
   <meta name="theme-color" content="#14201a">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Manhunt">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <main class="wrap hero">
     <div class="chase" aria-hidden="true"><i class="h"></i><i class="h"></i><i class="h"></i><i class="r"></i></div>
     <h1>Manhunt</h1>
-    <p>Runner sind unterwegs und teilen ihren Standort und Fotos. Hunter holen sie ein.</p>
+    <p>Runner sind unterwegs und teilen ihren Standort und Fotos. Hunter holen sie ein. Mit Quests, Fähigkeiten und Bestenliste.</p>
 
-    <div class="card stack">
+    <div id="authSlot"></div>
+
+    <div id="joinCard" class="card stack" hidden>
+      <div class="row between">
+        <span>Angemeldet als <b id="accName"></b></span>
+        <button class="btn small light" id="logoutBtn">Abmelden</button>
+      </div>
       <div>
         <label for="code">Spielcode</label>
         <input id="code" class="code" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE">
@@ -22,14 +35,24 @@
       <button class="btn big" id="go">Beitreten</button>
     </div>
 
+    <div id="invites"></div>
+    <div id="pushSlot"></div>
+    <div class="row">
+      <a class="btn light" href="/profile" id="profileLink" hidden>👤 Profil &amp; Freunde</a>
+      <a class="btn light" href="/leaderboard">🏆 Bestenliste</a>
+      <a class="btn light" href="/gallery">⭐ Galerie</a>
+    </div>
+
     <section id="recent" hidden>
       <h2>Deine Spiele auf diesem Gerät</h2>
       <ul class="plist" id="recentList"></ul>
     </section>
 
-    <p class="small muted">Spielleitung? <a href="/admin">Hier Spiele anlegen und steuern.</a></p>
+    <p class="small muted">Tipp: Mit der Android-App wird dein Standort auch bei gesperrtem Bildschirm geteilt.<br>
+      Spielleitung? <a href="/admin">Hier Spiele anlegen und steuern.</a></p>
   </main>
   <script src="/common.js"></script>
+  <script src="/auth.js"></script>
   <script src="/index.js"></script>
 </body>
 </html>

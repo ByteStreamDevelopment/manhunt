@@ -1,0 +1,15 @@
+{
+    "code": "X462L",
+    "name": "Test",
+    "status": "lobby",
+    "runners": 1,
+    "hunters": 1,
+    "settings": {
+        "locationIntervalSec": 120,
+        "photosEnabled": true,
+        "photoIntervalMin": 1,
+        "headStartMin": 0,
+        "fuzzMeters": 100,
+        "zoneEnabled": true
+    }
+}
