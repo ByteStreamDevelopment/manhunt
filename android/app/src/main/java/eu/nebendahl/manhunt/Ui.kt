@@ -554,6 +554,7 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
 
     val due = st.photoDue(serverNow, localLastPhoto)
     val sorted = st.photos.sortedByDescending { it.ts }
+    val ctx = LocalContext.current
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -562,6 +563,18 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        // Nach Spielende: alle Fotos als ZIP (Issue #3)
+        if (st.game.status == "ended" && sorted.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                OutlinedButton(
+                    onClick = {
+                        val s = GameRepository.session.value ?: return@OutlinedButton
+                        downloadFile(ctx, Api.photosZipUrl(s.code, s.token), "Manhunt-${st.game.code}-Fotos.zip")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("⬇️ Alle ${sorted.size} Fotos als ZIP herunterladen") }
+            }
+        }
         if (due != null) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Card(Modifier.fillMaxWidth()) {
@@ -618,7 +631,7 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
                     val b = bmp
                     if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
                     else Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> cat?.quest(q)?.let { d -> " · ${d.icon} ${d.title}" } } ?: ""), Modifier.padding(top = 6.dp))
+                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> " · 📜 " + (ph.questTitle ?: cat?.quest(q)?.title ?: q) } ?: ""), Modifier.padding(top = 6.dp))
                 }
             }
         }

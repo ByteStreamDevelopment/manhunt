@@ -93,3 +93,26 @@ fun prepareJpeg(ctx: Context, uri: Uri): ByteArray {
     out.compress(Bitmap.CompressFormat.JPEG, 82, bos)
     return bos.toByteArray()
 }
+
+/**
+ * Lädt eine Datei (z. B. alle Fotos als ZIP) in den Download-Ordner.
+ * Ab Android 10 über den DownloadManager ohne Extra-Berechtigung, davor über den Browser.
+ */
+fun downloadFile(ctx: Context, url: String, fileName: String) {
+    if (android.os.Build.VERSION.SDK_INT >= 29) {
+        val req = android.app.DownloadManager.Request(Uri.parse(url))
+            .setTitle(fileName)
+            .setDescription("Manhunt")
+            .setMimeType("application/zip")
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
+        ctx.getSystemService(android.app.DownloadManager::class.java).enqueue(req)
+        android.widget.Toast.makeText(ctx, "Download gestartet – siehe Benachrichtigungen", android.widget.Toast.LENGTH_LONG).show()
+    } else {
+        try {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.widget.Toast.makeText(ctx, "Kein Browser gefunden", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+}

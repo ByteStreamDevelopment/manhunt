@@ -209,7 +209,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                 }
             }
             items(qs, key = { "q_" + it.id }) { q ->
-                val d = c.quest(q.key)
+                val d = c.quest(q)
                 val active = q.status == "active"
                 Card(
                     Modifier.fillMaxWidth(),

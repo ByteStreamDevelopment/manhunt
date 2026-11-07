@@ -39,6 +39,8 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.3: Chat für alle (🌍), alle Fotos nach Spielende als ZIP, eigene Quests im Einstellungs-Formular,
+  Spielleitung ohne Vorteile, wenn sie selbst mitspielt
 - Neu in 2.2: Profil mit Verlauf, Saisons und Abzeichen; Freunde und Einladungen (mit Benachrichtigung, solange die App offen ist);
   Saison-Bestenliste; Versorgungsabwürfe 📦; Spielleitung kann Spiele mit allen Einstellungen in der App anlegen und bearbeiten
 - Neu in 2.1: Team-Chat mit Sprachnachrichten (🎙️ gedrückt halten), Zuschauer-Modus, Wiederholung nach Spielende,

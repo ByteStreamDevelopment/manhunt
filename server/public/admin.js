@@ -30,9 +30,11 @@
       { k: 'questIntervalMin', t: 'num', label: 'Neue Quest alle (Minuten)' },
       { k: 'questMaxActive', t: 'num', label: 'Höchstens gleichzeitig aktive Quests pro Spieler' },
       { k: 'quests', t: 'quests' },
+      { k: 'customQuests', t: 'custom' },
     ] },
     { group: 'Fähigkeiten', items: [
       { k: 'abilitiesEnabled', t: 'bool', label: 'Fähigkeiten an' },
+      { k: 'adminGiftsEnabled', t: 'bool', label: 'Spielleitung darf Fähigkeiten verschenken', hint: 'Standardmäßig aus. Spielt die Spielleitung selbst mit, ist es immer gesperrt.' },
       { k: 'freezeImmunitySec', t: 'num', label: 'Nach einem Freeze sind Hunter so lange immun (Sekunden)', hint: 'Verhindert Dauer-Freeze durch mehrere Runner hintereinander.' },
       { k: 'abilities', t: 'abilities' },
     ] },
@@ -65,6 +67,7 @@
     ] },
     { group: 'Chat und Zuschauer', items: [
       { k: 'chatEnabled', t: 'bool', label: 'Team-Chat (jedes Team sieht nur seinen eigenen Chat)' },
+      { k: 'allChatEnabled', t: 'bool', label: 'Zusätzlich ein Chat für alle (Zuschauer lesen nur mit)' },
       { k: 'voiceEnabled', t: 'bool', label: 'Sprachnachrichten im Team-Chat (wie ein Walkie-Talkie)' },
       { k: 'spectatorsEnabled', t: 'bool', label: 'Zuschauer dürfen beitreten' },
       { k: 'spectatorDelaySec', t: 'num', label: 'Zuschauer sehen alles verzögert um (Sekunden)', hint: 'Damit Zuschauer den Spielern nichts Aktuelles verraten können.' },
@@ -116,6 +119,45 @@
           inner.append(h('div', { class: 'tablewrap' }, h('table', { class: 'cfg' },
             h('thead', {}, h('tr', {}, h('th', {}, 'Fähigkeit'), h('th', {}, 'Erlaubt'), h('th', {}, 'Zum Start'), h('th', {}, 'Im Spiel erhältlich'), h('th', {}, 'Dauer (s)'), h('th', {}, 'Abklingzeit (s)'))),
             h('tbody', {}, rows))));
+        } else if (f.t === 'custom') {
+          // Eigene Quests: Foto-Quest oder fester Ort
+          const list = h('div', { class: 'stack' });
+          nested.custom = [];
+          const addRow = (q = {}) => {
+            const row = { id: q.id };
+            const inp = (attrs) => h('input', attrs);
+            row.title = inp({ type: 'text', maxlength: '40', value: q.title || '', placeholder: 'Titel, z. B. „Zum Rathaus“' });
+            row.desc = inp({ type: 'text', maxlength: '200', value: q.desc || '', placeholder: 'Beschreibung / Aufgabe' });
+            row.icon = inp({ type: 'text', maxlength: '4', value: q.icon || '⭐', style: 'width:4rem' });
+            row.team = h('select', {}, [['any', 'Alle'], ['runner', 'Runner'], ['hunter', 'Hunter']].map(([v, l]) => h('option', { value: v, selected: (q.team || 'any') === v }, l)));
+            row.kind = h('select', {}, [['photo', '📷 Foto-Quest'], ['place', '📍 Ort erreichen']].map(([v, l]) => h('option', { value: v, selected: (q.kind || 'photo') === v }, l)));
+            row.minutes = inp({ type: 'number', min: '1', max: '120', value: q.minutes ?? 10, title: 'Minuten' });
+            row.points = inp({ type: 'number', min: '0', max: '1000', value: q.points ?? 50, title: 'Punkte' });
+            row.reward = h('select', {}, [h('option', { value: 'random' }, 'Zufällige Fähigkeit'), h('option', { value: 'none' }, 'Nur Punkte'),
+              ...Object.values(CAT.abilities).map((a) => h('option', { value: a.key }, `${a.icon} ${a.name}`))]);
+            row.reward.value = q.reward || 'random';
+            row.enabled = inp({ type: 'checkbox', checked: q.enabled !== false });
+            row.lat = inp({ type: 'number', step: 'any', value: q.lat ?? '', placeholder: 'Breitengrad' });
+            row.lng = inp({ type: 'number', step: 'any', value: q.lng ?? '', placeholder: 'Längengrad' });
+            row.radiusM = inp({ type: 'number', min: '15', max: '500', value: q.radiusM ?? 40, title: 'Radius (m)' });
+            row.placeName = inp({ type: 'text', maxlength: '60', value: q.placeName || '', placeholder: 'Ortsname (optional)' });
+            const place = h('div', { class: 'row' }, row.lat, row.lng, row.radiusM, row.placeName,
+              h('button', { class: 'btn small light', type: 'button', onclick: () => navigator.geolocation.getCurrentPosition((p) => {
+                row.lat.value = p.coords.latitude.toFixed(6); row.lng.value = p.coords.longitude.toFixed(6);
+              }, () => toast('Standort nicht verfügbar'), { enableHighAccuracy: true, timeout: 15000 }) }, '📍 Mein Standort'));
+            const syncKind = () => { place.hidden = row.kind.value !== 'place'; };
+            row.kind.addEventListener('change', syncKind); syncKind();
+            const box = h('div', { class: 'card stack' },
+              h('div', { class: 'row' }, row.enabled, row.icon, row.title, h('button', { class: 'btn small light', type: 'button', onclick: () => { box.remove(); nested.custom = nested.custom.filter((x) => x !== row); } }, 'Entfernen')),
+              row.desc,
+              h('div', { class: 'row' }, row.kind, row.team, h('label', {}, 'Min.', row.minutes), h('label', {}, 'Punkte', row.points), row.reward),
+              place);
+            nested.custom.push(row);
+            list.append(box);
+          };
+          for (const q of values.customQuests || []) addRow(q);
+          inner.append(h('h4', {}, 'Eigene Quests'), h('p', { class: 'hint' }, 'Foto-Quests werden per Foto erfüllt (du kannst sie unter „Fotos“ ablehnen). Ort-Quests sind erfüllt, wenn man den Punkt erreicht.'),
+            list, h('button', { class: 'btn small', type: 'button', onclick: () => addRow() }, '➕ Eigene Quest'));
         } else if (f.t === 'quests') {
           nested.quests = {};
           const rewardOpts = (cur, team) => [
@@ -156,6 +198,13 @@
       if (nested.abilities) {
         out.abilities = {};
         for (const [k, x] of Object.entries(nested.abilities)) out.abilities[k] = { enabled: x.en.checked, start: Number(x.st.value), obtainable: x.ob.checked, cooldownSec: Number(x.cd.value), ...(x.du ? { durationSec: Number(x.du.value) } : {}) };
+      }
+      if (nested.custom) {
+        out.customQuests = nested.custom.filter((r) => r.title.value.trim()).map((r) => ({
+          id: r.id, enabled: r.enabled.checked, title: r.title.value, desc: r.desc.value, icon: r.icon.value || '⭐', team: r.team.value, kind: r.kind.value,
+          minutes: Number(r.minutes.value), points: Number(r.points.value), reward: r.reward.value,
+          ...(r.kind.value === 'place' ? { lat: Number(r.lat.value), lng: Number(r.lng.value), radiusM: Number(r.radiusM.value), placeName: r.placeName.value } : {}),
+        }));
       }
       if (nested.quests) {
         out.quests = {};
@@ -209,10 +258,11 @@
       const names = Object.fromEntries(st.players.map((p) => [p.id, p.name]));
       const list = [...st.photos].sort((a, b) => b.ts - a.ts);
       box.replaceChildren(
-        h('h3', {}, `Fotos (${list.length}) – mit ⭐ in die Galerie der besten Fotos übernehmen`),
+        h('div', { class: 'row between' }, h('h3', {}, `Fotos (${list.length}) – mit ⭐ in die Galerie übernehmen`),
+          list.length ? h('a', { class: 'btn small light', href: `/api/g/${g.code}/photos.zip?t=${encodeURIComponent(token)}` }, '⬇️ Alle als ZIP') : null),
         list.length ? h('div', { class: 'photos' }, list.map((ph) => {
           const src = `/api/g/${g.code}/photo/${ph.id}?t=${encodeURIComponent(token)}`;
-          const quest = ph.quest && CAT.quests[ph.quest] ? ` · ${CAT.quests[ph.quest].icon} ${CAT.quests[ph.quest].title}` : '';
+          const quest = ph.quest ? ` · 📜 ${ph.questTitle || (CAT.quests[ph.quest] || {}).title || 'Quest'}` : '';
           const cap = `${names[ph.pid] || '?'}, ${clock(ph.ts)}${quest}`;
           return h('figure', {},
             h('button', { onclick: () => { $('#lbImg').src = src; $('#lbCap').textContent = cap; $('#lightbox').showModal(); } }, h('img', { src, alt: '', loading: 'lazy' })),
@@ -265,6 +315,7 @@
       h('div', { class: 'row between' },
         h('h3', {}, `${g.name} `, h('span', { class: 'code' }, g.code)),
         h('span', { class: `chip ${g.status === 'running' ? 'runner' : g.status === 'ended' ? 'plain' : 'gold'}` }, STATUS[g.status])),
+      g.youPlay ? h('p', { class: 'small' }, h('span', { class: 'chip gold' }, '🎮 Du spielst mit'), ' – Live-Karte, Spieler- und Foto-Verwaltung sind gesperrt, damit es fair bleibt.') : null,
       h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.spectators || 0} Zuschauer, ${g.photos} Fotos`),
       g.flagged.length ? h('p', { class: 'err small' }, `⚠️ Verdacht: ${g.flagged.map((f) => `${f.name} (${[f.flags.vpn && 'VPN', f.flags.spoof && 'GPS'].filter(Boolean).join(', ')})`).join(', ')}`) : null,
       h('div', { class: 'row' },

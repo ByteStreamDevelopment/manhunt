@@ -90,6 +90,7 @@ private val GROUPS: List<Pair<String, List<F>>> = listOf(
     ),
     "Fähigkeiten" to listOf(
         F.Bool("abilitiesEnabled", "Fähigkeiten an"),
+        F.Bool("adminGiftsEnabled", "Spielleitung darf Fähigkeiten verschenken", "Standard aus; beim Mitspielen immer gesperrt"),
         F.Num("freezeImmunitySec", "Freeze-Immunität danach (Sekunden)"),
     ),
     "Pickups und Abwürfe" to listOf(
@@ -120,6 +121,7 @@ private val GROUPS: List<Pair<String, List<F>>> = listOf(
     ),
     "Chat und Zuschauer" to listOf(
         F.Bool("chatEnabled", "Team-Chat"),
+        F.Bool("allChatEnabled", "Zusätzlich Chat für alle"),
         F.Bool("voiceEnabled", "Sprachnachrichten"),
         F.Bool("spectatorsEnabled", "Zuschauer erlaubt"),
         F.Num("spectatorDelaySec", "Zuschauer-Verzögerung (Sekunden)"),
@@ -231,7 +233,7 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
                                 fields.forEach { f -> FieldRow(f, values) }
                                 if (group == "Spielzone") OutlinedButton(onClick = { useMyLocation() }) { Text("📍 Mein Standort als Mittelpunkt") }
                                 if (group == "Fähigkeiten") cat?.let { AbilityTable(it, values) }
-                                if (group == "Quests") cat?.let { QuestTable(it, values) }
+                                if (group == "Quests") { CustomQuestsEditor(values, cat); cat?.let { QuestTable(it, values) } }
                             }
                         }
                     }
@@ -280,6 +282,84 @@ private fun SelectField(label: String, options: List<Pair<String, String>>, curr
                 options.forEach { (v, l) -> DropdownMenuItem(text = { Text(l) }, onClick = { expanded = false; onSelect(v) }) }
             }
         }
+    }
+}
+
+/* ---------------- Eigene Quests (Issue #2) ---------------- */
+
+private data class CQ(
+    val id: String?, val enabled: Boolean, val title: String, val desc: String, val icon: String, val team: String, val kind: String,
+    val minutes: String, val points: String, val reward: String, val lat: String, val lng: String, val radiusM: String, val placeName: String,
+)
+
+private fun cqFrom(o: JSONObject) = CQ(
+    o.optString("id").ifBlank { null }, o.optBoolean("enabled", true), o.optString("title"), o.optString("desc"), o.optString("icon", "⭐"),
+    o.optString("team", "any"), o.optString("kind", "photo"), o.optInt("minutes", 10).toString(), o.optInt("points", 50).toString(),
+    o.optString("reward", "random"), o.opt("lat")?.toString() ?: "", o.opt("lng")?.toString() ?: "", o.optInt("radiusM", 40).toString(), o.optString("placeName"),
+)
+
+private fun cqJson(q: CQ) = JSONObject().apply {
+    q.id?.let { put("id", it) }
+    put("enabled", q.enabled); put("title", q.title); put("desc", q.desc); put("icon", q.icon.ifBlank { "⭐" })
+    put("team", q.team); put("kind", q.kind); put("minutes", q.minutes.toIntOrNull() ?: 10); put("points", q.points.toIntOrNull() ?: 50)
+    put("reward", q.reward)
+    if (q.kind == "place") {
+        put("lat", q.lat.replace(',', '.').toDoubleOrNull() ?: 0.0); put("lng", q.lng.replace(',', '.').toDoubleOrNull() ?: 0.0)
+        put("radiusM", q.radiusM.toIntOrNull() ?: 40); put("placeName", q.placeName)
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun CustomQuestsEditor(values: SnapshotStateMap<String, Any>, cat: Catalog?) {
+    val ctx = LocalContext.current
+    val list = remember {
+        val arr = values["customQuests"] as? org.json.JSONArray ?: org.json.JSONArray()
+        androidx.compose.runtime.mutableStateListOf<CQ>().apply { for (i in 0 until arr.length()) add(cqFrom(arr.getJSONObject(i))) }
+    }
+    fun commit() { values["customQuests"] = org.json.JSONArray().apply { list.filter { it.title.isNotBlank() }.forEach { put(cqJson(it)) } } }
+    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    Text("Eigene Quests", fontWeight = FontWeight.Bold)
+    Text("Foto-Quests werden per Foto erfüllt (ablehnbar), Ort-Quests beim Erreichen des Punkts.", style = MaterialTheme.typography.bodySmall)
+    list.forEachIndexed { i, q ->
+        fun upd(n: CQ) { list[i] = n; commit() }
+        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(q.icon, { upd(q.copy(icon = it.take(4))) }, Modifier.width(64.dp), singleLine = true)
+                    OutlinedTextField(q.title, { upd(q.copy(title = it.take(40))) }, Modifier.weight(1f).padding(start = 6.dp), label = { Text("Titel") }, singleLine = true)
+                    Switch(q.enabled, { upd(q.copy(enabled = it)) })
+                }
+                OutlinedTextField(q.desc, { upd(q.copy(desc = it.take(200))) }, Modifier.fillMaxWidth(), label = { Text("Aufgabe") })
+                SelectField("Art", listOf("photo" to "📷 Foto", "place" to "📍 Ort erreichen"), q.kind) { upd(q.copy(kind = it)) }
+                SelectField("Für", listOf("any" to "Alle", "runner" to "Runner", "hunter" to "Hunter"), q.team) { upd(q.copy(team = it)) }
+                val rewards = listOf("random" to "🎲 Zufall", "none" to "nur Punkte") + (cat?.abilities?.values?.map { it.key to "${it.icon} ${it.name}" } ?: emptyList())
+                SelectField("Belohnung", rewards, q.reward) { upd(q.copy(reward = it)) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(q.minutes, { upd(q.copy(minutes = it.filter(Char::isDigit))) }, Modifier.width(90.dp), label = { Text("Min.") }, singleLine = true)
+                    OutlinedTextField(q.points, { upd(q.copy(points = it.filter(Char::isDigit))) }, Modifier.width(100.dp), label = { Text("Punkte") }, singleLine = true)
+                }
+                if (q.kind == "place") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(q.lat, { upd(q.copy(lat = it)) }, Modifier.weight(1f), label = { Text("Breite") }, singleLine = true)
+                        OutlinedTextField(q.lng, { upd(q.copy(lng = it)) }, Modifier.weight(1f), label = { Text("Länge") }, singleLine = true)
+                        OutlinedTextField(q.radiusM, { upd(q.copy(radiusM = it.filter(Char::isDigit))) }, Modifier.width(80.dp), label = { Text("m") }, singleLine = true)
+                    }
+                    OutlinedTextField(q.placeName, { upd(q.copy(placeName = it.take(60))) }, Modifier.fillMaxWidth(), label = { Text("Ortsname (optional)") }, singleLine = true)
+                    OutlinedButton(onClick = {
+                        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                            Toast.makeText(ctx, "Standort nicht erlaubt", Toast.LENGTH_SHORT).show(); return@OutlinedButton
+                        }
+                        LocationServices.getFusedLocationProviderClient(ctx).getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                            .addOnSuccessListener { l -> if (l != null) upd(list[i].copy(lat = "%.6f".format(java.util.Locale.US, l.latitude), lng = "%.6f".format(java.util.Locale.US, l.longitude))) }
+                    }) { Text("📍 Hier") }
+                }
+                TextButton(onClick = { list.removeAt(i); commit() }) { Text("Entfernen") }
+            }
+        }
+    }
+    OutlinedButton(onClick = { list.add(CQ(null, true, "", "", "⭐", "any", "photo", "10", "50", "random", "", "", "40", "")); commit() }) {
+        Text("➕ Eigene Quest")
     }
 }
 

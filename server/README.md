@@ -29,6 +29,13 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.3
+
+* **Chat für alle** zusätzlich zum Team-Chat (abschaltbar). Zuschauer lesen dort nur mit.
+* **Alle Fotos als ZIP:** Nach Spielende kann jeder Mitspieler alle Fotos herunterladen (ein Ordner pro Fotograf, Dateiname mit Uhrzeit und Quest). Die Spielleitung kann das jederzeit.
+* **Eigene Quests:** Die Spielleitung legt pro Spiel eigene Foto-Quests oder Ort-Quests (fester Punkt mit Radius) an – für Runner, Hunter oder alle.
+* **Faire Spielleitung:** Spielt ein Admin-Account selbst mit, sind alle Vorteile gesperrt (Rundumsicht/Live-Karte, Fähigkeiten verschenken, Spieler fangen/entfernen, Fotos ablehnen, Einstellungen außerhalb der Lobby). Fähigkeiten verschenken ist außerdem standardmäßig aus und muss pro Spiel eingeschaltet werden.
+
 ## Neu in 2.2
 
 * **Profile** (`/profile?u=NAME`, in der App über „Profil & Freunde“ oder die Bestenliste): Statistik, alle Abzeichen, Platzierungen pro Saison und die letzten 30 Spiele.
@@ -140,6 +147,7 @@ lib/geo.js         Entfernungen, große Orte über Overpass
 lib/anticheat.js   VPN- und GPS-Fälschungs-Erkennung
 lib/store.js       SQLite-Speicher (Spiele, Accounts, Standorte)
 lib/social.js      Profile, Saisons, Freunde, Einladungen, Push-Abos
+lib/zip.js         ZIP-Download aller Fotos (ohne Abhängigkeiten)
 lib/webpush.js     Web Push (VAPID + Verschlüsselung nach RFC 8291), ohne Abhängigkeiten
 test/features.mjs  Schneller Test (Neustart, Chat, Zuschauer, Abklingzeiten, Seitenwechsel …)
 test/e2e.mjs       End-to-End-Test inkl. Quests/Pickups/Live-Strafe (npm test, ca. 2 Minuten)

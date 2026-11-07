@@ -11,6 +11,7 @@ const crypto = require('node:crypto');
 const { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients } = require('./lib/catalog');
 const { Store } = require('./lib/store');
 const { createSocial } = require('./lib/social');
+const { ZipWriter, safeName } = require('./lib/zip');
 const { haversine, offset, randomPointAround, fetchPois } = require('./lib/geo');
 const { detectVpn, checkSpoof } = require('./lib/anticheat');
 const smtp = require('./lib/smtp');
@@ -78,6 +79,7 @@ const DEFAULTS = {
   caughtBecomeHunter: true,      // Gefangene Runner spielen als Hunter weiter
   freezeImmunitySec: 120,        // nach einem Freeze sind Hunter so lange immun gegen den nächsten
   chatEnabled: true,             // Team-Chat
+  allChatEnabled: true,          // zusätzlich ein Chat für alle (Runner, Hunter, Zuschauer lesen mit)
   voiceEnabled: true,            // Sprachnachrichten im Team-Chat
   spectatorsEnabled: true,       // Zuschauer dürfen beitreten
   spectatorDelaySec: 120,        // Zuschauer sehen Positionen so viel später (damit sie nichts verraten)
@@ -107,6 +109,8 @@ const DEFAULTS = {
   maxSpeedKmh: 45,               // schneller = verdächtig
   abilities: defaultAbilities(),
   quests: defaultQuests(),
+  customQuests: [],              // eigene Quests der Spielleitung (Foto oder fester Ort)
+  adminGiftsEnabled: false,      // Spielleitung darf Fähigkeiten verschenken (Standard: aus, sonst unfair)
 };
 const LIMITS = {
   locationIntervalSec: [10, 3600], headStartMin: [0, 600], autoEndAfterMin: [0, 1440],
@@ -125,9 +129,10 @@ function sanitizeSettings(input, base = DEFAULTS) {
   const out = { ...DEFAULTS, ...base };
   out.abilities = { ...defaultAbilities(), ...(base.abilities || {}) };
   out.quests = { ...defaultQuests(), ...(base.quests || {}) };
+  out.customQuests = Array.isArray(base.customQuests) ? base.customQuests : [];
   if (!input || typeof input !== 'object') return out;
   for (const key of Object.keys(DEFAULTS)) {
-    if (!(key in input) || key === 'abilities' || key === 'quests') continue;
+    if (!(key in input) || key === 'abilities' || key === 'quests' || key === 'customQuests') continue;
     const v = input[key];
     if (ENUMS[key]) { if (ENUMS[key].includes(v)) out[key] = v; }
     else if (typeof DEFAULTS[key] === 'boolean') out[key] = toBool(v);
@@ -150,6 +155,29 @@ function sanitizeSettings(input, base = DEFAULTS) {
         cooldownSec: 'cooldownSec' in v ? Math.round(clampNum(v.cooldownSec, 0, 3600, cur.cooldownSec ?? 0)) : (cur.cooldownSec ?? def.cooldownSec ?? 0),
       };
     }
+  }
+  if (Array.isArray(input.customQuests)) {
+    out.customQuests = input.customQuests.slice(0, 30).map((q) => {
+      const kind = q && q.kind === 'place' ? 'place' : 'photo';
+      const c = {
+        id: typeof q?.id === 'string' && /^[a-z0-9]{4,12}$/.test(q.id) ? q.id : crypto.randomBytes(4).toString('hex'),
+        enabled: q.enabled !== false && q.enabled !== 'false',
+        title: String(q.title || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 40),
+        desc: String(q.desc || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200),
+        icon: String(q.icon || '⭐').slice(0, 4),
+        team: ['runner', 'hunter', 'any'].includes(q.team) ? q.team : 'any',
+        kind,
+        minutes: Math.round(clampNum(q.minutes, 1, 120, 10)),
+        points: Math.round(clampNum(q.points, 0, 1000, 50)),
+        reward: q.reward === 'none' || ABILITIES[q.reward] ? q.reward : 'random',
+      };
+      if (kind === 'place') {
+        c.lat = clampNum(q.lat, -90, 90, 0); c.lng = clampNum(q.lng, -180, 180, 0);
+        c.radiusM = Math.round(clampNum(q.radiusM, 15, 500, 40));
+        c.placeName = String(q.placeName || c.title).slice(0, 60);
+      }
+      return c;
+    }).filter((q) => q.title);
   }
   if (input.quests && typeof input.quests === 'object') {
     for (const k of Object.keys(QUESTS)) {
@@ -252,11 +280,25 @@ function safeEq(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
-function makeAdminToken() { const exp = String(Date.now() + 7 * 864e5); return `${exp}.${hmac(exp)}`; }
+/**
+ * Admin-Token. Mit Account-Anmeldung steht der Name drin (exp.name.sig), damit der Server weiß,
+ * wer die Spielleitung ist – wichtig, wenn sie selbst mitspielt. Mit Server-Passwort: exp.sig (ohne Namen).
+ */
+function makeAdminToken(username = '') {
+  const exp = String(Date.now() + 7 * 864e5);
+  if (!username) return `${exp}.${hmac(exp)}`;
+  const u = Buffer.from(username).toString('base64url');
+  return `${exp}.${u}.${hmac(`${exp}|${u}`)}`;
+}
+/** false, wenn ungültig; sonst { username } ('' = Server-Passwort) */
 function checkAdminToken(t) {
   if (typeof t !== 'string') return false;
-  const [exp, sig] = t.split('.');
-  return !!(exp && sig && /^\d+$/.test(exp) && Number(exp) > Date.now() && safeEq(sig, hmac(exp)));
+  const parts = t.split('.');
+  const exp = parts[0];
+  if (!/^\d+$/.test(exp || '') || Number(exp) <= Date.now()) return false;
+  if (parts.length === 2) return safeEq(parts[1], hmac(exp)) ? { username: '' } : false;
+  if (parts.length === 3) return safeEq(parts[2], hmac(`${exp}|${parts[1]}`)) ? { username: Buffer.from(parts[1], 'base64url').toString() } : false;
+  return false;
 }
 function newCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -442,7 +484,7 @@ async function handleAuth(req, res, p) {
   if (p === '/api/auth/me' && m === 'GET') {
     const a = accountFromToken(req.headers['x-account'] || req.headers['x-token']);
     if (!a) throw new HttpError(401, 'Nicht angemeldet');
-    return sendJSON(res, 200, { account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken() : undefined });
+    return sendJSON(res, 200, { account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken(a.username) : undefined });
   }
   throw new HttpError(404, 'Nicht gefunden');
 }
@@ -450,7 +492,7 @@ async function handleAuth(req, res, p) {
 for (const a of Object.values(db.accounts)) { a.stats = { ...emptyStats(), ...(a.stats || {}) }; checkBadges(a, null); }
 
 function loginResponse(a) {
-  return { token: makeAccountToken(a), account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken() : undefined };
+  return { token: makeAccountToken(a), account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken(a.username) : undefined };
 }
 
 /** Punkte und Statistik auf Spieler (für dieses Spiel) und Account (Bestenliste) buchen. */
@@ -593,17 +635,25 @@ function chatGate(pl) {
   if (Date.now() - last < 1500) throw new HttpError(429, 'Nicht so schnell');
   chatLast.set(pl.id, Date.now());
 }
-function pushChat(g, pl, msg) {
-  g.chat.push({ id: rid(4), ts: Date.now(), pid: pl.id, name: pl.name, team: pl.role, text: msg.text || '', voice: msg.voice || null });
+/** channel: 'team' (nur das eigene Team) oder 'all' (alle im Spiel) */
+function pushChat(g, pl, msg, channel = 'team') {
+  g.chat.push({ id: rid(4), ts: Date.now(), pid: pl.id, name: pl.name, team: pl.role, channel, text: msg.text || '', voice: msg.voice || null });
   if (g.chat.length > 300) {
     for (const c of g.chat.splice(0, g.chat.length - 300)) if (c.voice) fs.unlink(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`), () => {});
   }
   award(pl, 'chats', 0);
   for (const p of Object.values(g.players)) {
-    if (p.id !== pl.id && p.role === pl.role && p.accountId) {
-      social.notifyAccount(p.accountId, { title: `💬 ${pl.name}`, body: msg.voice ? '🎙️ Sprachnachricht' : cleanText(msg.text, 120), url: `/g/${g.code}`, tag: 'chat' });
+    if (p.id !== pl.id && (channel === 'all' || p.role === pl.role) && p.accountId) {
+      social.notifyAccount(p.accountId, { title: `💬 ${channel === 'all' ? '[Alle] ' : ''}${pl.name}`, body: msg.voice ? '🎙️ Sprachnachricht' : cleanText(msg.text, 120), url: `/g/${g.code}`, tag: 'chat' });
     }
   }
+}
+/** Kanal prüfen. Zuschauer dürfen im Chat für alle nur mitlesen (sonst könnten sie Positionen verraten). */
+function chatChannel(g, pl, requested) {
+  if (requested !== 'all') return 'team';
+  if (!g.settings.allChatEnabled) throw new HttpError(409, 'Der Chat für alle ist in diesem Spiel aus');
+  if (!isPlaying(pl)) throw new HttpError(403, 'Zuschauer können im Chat für alle nur mitlesen');
+  return 'all';
 }
 function deleteVoiceFiles(code) {
   try { for (const f of fs.readdirSync(VOICE_DIR)) if (f.startsWith(code + '_')) fs.unlinkSync(path.join(VOICE_DIR, f)); } catch { /* egal */ }
@@ -842,10 +892,23 @@ function liveReason(g, pl, now) {
 }
 
 /* ---------------- Quests ---------------- */
-const questCfg = (g, k) => g.settings.quests[k] || { enabled: false };
+/** Eingebaute oder eigene Quest (Schlüssel "c_<id>") als einheitliche Definition. */
+function questDef(g, key) {
+  if (QUESTS[key]) return QUESTS[key];
+  const c = key.startsWith('c_') && (g.settings.customQuests || []).find((x) => 'c_' + x.id === key);
+  if (!c) return { team: 'none', kind: 'gone', icon: '❓', title: 'Quest', desc: '', minutes: 10, points: 0 };
+  return { team: c.team, kind: c.kind === 'place' ? 'fixed' : 'photo', icon: c.icon || '⭐', title: c.title, desc: c.desc, minutes: c.minutes, points: c.points, custom: c };
+}
+const questTitle = (g, key) => questDef(g, key).title;
+const questCfg = (g, k) => {
+  const c = k.startsWith('c_') && (g.settings.customQuests || []).find((x) => 'c_' + x.id === k);
+  if (c) return { enabled: c.enabled, minutes: c.minutes, points: c.points, reward: c.reward };
+  return g.settings.quests[k] || { enabled: false };
+};
+const allQuestKeys = (g) => [...Object.keys(QUESTS), ...(g.settings.customQuests || []).map((c) => 'c_' + c.id)];
 function questFeasible(g, pl, key) {
-  const q = QUESTS[key], s = g.settings;
-  if (q.team !== pl.role) return false;
+  const q = questDef(g, key), s = g.settings;
+  if (q.team !== pl.role && !(q.team === 'any' && isPlaying(pl))) return false;
   if (!questCfg(g, key).enabled) return false;
   switch (q.kind) {
     case 'edge': return s.zoneEnabled && !!pl.lastLoc;
@@ -856,6 +919,7 @@ function questFeasible(g, pl, key) {
     case 'dare': return huntersOf(g).length >= 1 && !!pl.lastLoc;
     case 'near': case 'catch': return runnersOf(g).some((r) => !r.caught);
     case 'photo': return true;
+    case 'fixed': return true;
     default: return false;
   }
 }
@@ -874,11 +938,11 @@ function pointInZone(g, lat, lng) {
 }
 function assignQuest(g, pl, now) {
   const recent = new Set(pl.quests.slice(-4).map((q) => q.key));
-  let keys = Object.keys(QUESTS).filter((k) => questFeasible(g, pl, k));
+  let keys = allQuestKeys(g).filter((k) => questFeasible(g, pl, k));
   if (!keys.length) return;
   const fresh = keys.filter((k) => !recent.has(k));
   if (fresh.length) keys = fresh;
-  const key = pick(keys), def = QUESTS[key], cfg = questCfg(g, key);
+  const key = pick(keys), def = questDef(g, key), cfg = questCfg(g, key);
   const q = { id: rid(4), key, start: now, until: now + cfg.minutes * 60000, status: 'active', target: null, progress: null };
   if (def.kind === 'checkpoint') {
     let pt = null;
@@ -891,6 +955,9 @@ function assignQuest(g, pl, now) {
   } else if (def.kind === 'poi') {
     const p = nearestPoi(g, pl.lastLoc, 1500);
     q.target = { lat: p.lat, lng: p.lng, name: p.name, radiusM: 60 };
+  } else if (def.kind === 'fixed') {
+    const c = def.custom;
+    q.target = { lat: c.lat, lng: c.lng, name: c.placeName || c.title, radiusM: c.radiusM };
   }
   pl.quests.push(q);
   if (pl.quests.length > 30) pl.quests.splice(0, pl.quests.length - 30);
@@ -898,7 +965,7 @@ function assignQuest(g, pl, now) {
 }
 function completeQuest(g, pl, q) {
   if (q.status !== 'active') return;
-  const def = QUESTS[q.key], cfg = questCfg(g, q.key);
+  const def = questDef(g, q.key), cfg = questCfg(g, q.key);
   q.status = 'done'; q.doneAt = Date.now(); q.pointsAwarded = cfg.points;
   award(pl, 'quests', cfg.points);
   let got = null;
@@ -910,19 +977,19 @@ function completeQuest(g, pl, q) {
   inbox(pl, `🏆 Quest geschafft: ${def.title} (+${cfg.points} Punkte${got ? `, ${ABILITIES[got].icon} ${ABILITIES[got].name}` : ''})`, 'reward');
 }
 function completeQuestsOfKind(g, pl, kind) {
-  for (const q of pl.quests) if (q.status === 'active' && QUESTS[q.key].kind === kind) completeQuest(g, pl, q);
+  for (const q of pl.quests) if (q.status === 'active' && questDef(g, q.key).kind === kind) completeQuest(g, pl, q);
 }
 const fresh = (loc, now, ms = 180000) => loc && now - loc.ts < ms;
 function checkQuests(g, pl, now) {
   let changed = false;
   for (const q of pl.quests) {
     if (q.status !== 'active') continue;
-    if (now > q.until) { q.status = 'failed'; inbox(pl, `⌛ Quest verpasst: ${QUESTS[q.key].title}`, 'info'); changed = true; continue; }
-    const def = QUESTS[q.key];
+    if (now > q.until) { q.status = 'failed'; inbox(pl, `⌛ Quest verpasst: ${questTitle(g, q.key)}`, 'info'); changed = true; continue; }
+    const def = questDef(g, q.key);
     const me = pl.lastLoc;
     let ok = false;
     switch (def.kind) {
-      case 'checkpoint': case 'poi':
+      case 'checkpoint': case 'poi': case 'fixed':
         ok = me && me.ts >= q.start && haversine(me.lat, me.lng, q.target.lat, q.target.lng) <= q.target.radiusM + Math.min(me.acc || 0, 30);
         break;
       case 'distance': {
@@ -1234,7 +1301,13 @@ function buildState(g, auth) {
       id: viewer.id, name: viewer.name, role: viewer.role, caught: viewer.caught, lastLocTs: viewer.lastLoc?.ts || null,
       points: viewer.points || 0,
       abilities: Object.entries(viewer.abilities).filter(([k, n]) => n > 0 && ABILITIES[k]).map(([key, count]) => ({ key, count })),
-      quests: viewer.quests.map((q) => ({ id: q.id, key: q.key, status: q.status, start: q.start, until: q.until, target: q.target, progress: q.progress })),
+      quests: viewer.quests.map((q) => {
+        const d = questDef(g, q.key);
+        return {
+          id: q.id, key: q.key, status: q.status, start: q.start, until: q.until, target: q.target, progress: q.progress,
+          title: d.title, desc: d.desc, icon: d.icon, kind: d.kind, points: questCfg(g, q.key).points ?? d.points, custom: !!d.custom,
+        };
+      }),
       inbox: viewer.inbox.slice(-15),
       frozenUntil: viewerFrozen > now ? viewerFrozen : null,
       live: live ? live.reason : null,
@@ -1250,8 +1323,8 @@ function buildState(g, auth) {
   // Team-Chat: jeder sieht nur sein Team (Zuschauer unter sich), die Spielleitung alles
   const chatTeam = isAdmin ? null : viewerRole;
   const chat = (s.chatEnabled || isAdmin ? g.chat : [])
-    .filter((c) => isAdmin || c.team === chatTeam)
-    .slice(-80).map(({ id, ts, pid, name, team, text, voice }) => ({ id, ts, pid, name, team, text, voice: voice || null }));
+    .filter((c) => isAdmin || (c.channel === 'all' ? s.allChatEnabled : c.team === chatTeam))
+    .slice(-120).map(({ id, ts, pid, name, team, channel, text, voice }) => ({ id, ts, pid, name, team, channel: channel || 'team', text, voice: voice || null }));
   const gallerySet = new Set(db.gallery.map((x) => x.photoId));
   return {
     now,
@@ -1260,7 +1333,7 @@ function buildState(g, auth) {
     self,
     players,
     photos: g.photos.filter((ph) => visibleIds.has(ph.pid)).map(({ id, pid, ts, quest }) => ({
-      id, pid, ts, quest: quest || null, featured: isAdmin ? gallerySet.has(id) : undefined,
+      id, pid, ts, quest: quest || null, questTitle: quest ? questTitle(g, quest) : null, featured: isAdmin ? gallerySet.has(id) : undefined,
     })),
     messages: g.messages.filter((m) => isAdmin || m.kind !== 'cheat').slice(-40),
     effects,
@@ -1351,7 +1424,7 @@ async function handleApi(req, res, url) {
     if (b.username) {
       const a = findAccount(b.username);
       if (!a || !isAdminAccount(a) || !a.verified || !safeEq(a.hash, hashPassword(b.password || '', a.salt))) throw new HttpError(401, 'Kein Admin-Account oder falsches Passwort');
-      return sendJSON(res, 200, { token: makeAdminToken(), username: a.username });
+      return sendJSON(res, 200, { token: makeAdminToken(a.username), username: a.username });
     }
     if (!safeEq(String(b.password ?? ''), ADMIN_PASSWORD)) throw new HttpError(401, 'Falsches Passwort');
     return sendJSON(res, 200, { token: makeAdminToken() });
@@ -1363,7 +1436,24 @@ async function handleApi(req, res, url) {
   throw new HttpError(404, 'Nicht gefunden');
 }
 
-const isAdminRequest = (t) => checkAdminToken(t) || isAdminAccount(accountFromToken(t));
+const isAdminRequest = (t) => !!checkAdminToken(t) || isAdminAccount(accountFromToken(t));
+/** Name des Admin-Accounts hinter einem Token ('' = Server-Passwort, null = kein Admin) */
+function adminName(t) {
+  const c = checkAdminToken(t);
+  if (c) return c.username;
+  const a = accountFromToken(t);
+  return isAdminAccount(a) ? a.username : null;
+}
+/**
+ * Spielt die Spielleitung in diesem Spiel selbst mit (als Runner/Hunter, Spiel nicht beendet)?
+ * Dann bekommt sie keine Vorteile: keine Rundumsicht, keine Geschenke, kein Fangen/Entfernen usw.
+ */
+function adminPlaysIn(g, t) {
+  const name = adminName(t);
+  if (!name || g.status === 'ended') return false;
+  return Object.values(g.players).some((p) => isPlaying(p) && p.accountId && db.accounts[p.accountId]?.username.toLowerCase() === name.toLowerCase());
+}
+const PLAYING_ADMIN = 'Du spielst in diesem Spiel selbst mit – Spielleitungs-Vorteile sind gesperrt.';
 
 async function handleAdmin(req, res, url) {
   const token = req.headers['x-token'] || url.searchParams.get('t');
@@ -1372,7 +1462,7 @@ async function handleAdmin(req, res, url) {
 
   if (p === '/api/admin/catalog' && m === 'GET') return sendJSON(res, 200, { ...catalogForClients(), defaults: DEFAULTS, mailConfigured: smtp.enabled() });
   if (p === '/api/admin/games' && m === 'GET') {
-    const games = Object.values(db.games).sort((a, b) => b.createdAt - a.createdAt).map(adminSummary);
+    const games = Object.values(db.games).sort((a, b) => b.createdAt - a.createdAt).map((g) => ({ ...adminSummary(g), youPlay: adminPlaysIn(g, token) }));
     return sendJSON(res, 200, { games });
   }
   if (p === '/api/admin/games' && m === 'POST') {
@@ -1429,8 +1519,10 @@ async function handleAdmin(req, res, url) {
     deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; save();
     return sendJSON(res, 200, { ok: true });
   }
+  const playing = adminPlaysIn(g, token);
   if (!act && m === 'PATCH') {
     const b = await readJSON(req);
+    if (playing && g.status !== 'lobby' && b.settings) throw new HttpError(403, `${PLAYING_ADMIN} Einstellungen nur in der Lobby.`);
     if (b.name !== undefined) g.name = cleanText(b.name, 40) || g.name;
     if (b.settings) g.settings = sanitizeSettings(b.settings, g.settings);
     save(); notify(g.code);
@@ -1438,12 +1530,15 @@ async function handleAdmin(req, res, url) {
   }
   if (m === 'POST') {
     const b = await readJSON(req);
+    // Mitspielende Spielleitung: nur neutrale Aktionen (starten, beenden, zurücksetzen, Durchsage)
+    if (playing && !['start', 'end', 'reset', 'announce'].includes(act)) throw new HttpError(403, PLAYING_ADMIN);
     if (act === 'start') startGame(g);
     else if (act === 'end') endGame(g, 'Beendet von der Spielleitung.');
     else if (act === 'reset') resetGame(g);
     else if (act === 'announce') { const t = cleanText(b.text, 300); if (!t) throw new HttpError(400, 'Nachricht fehlt'); pushMsg(g, t, 'admin'); }
     else if (act === 'kick') { delete g.players[b.playerId]; clearLocations(g, b.playerId); g.photos = g.photos.filter((x) => x.pid !== b.playerId); }
     else if (act === 'give') {
+      if (!g.settings.adminGiftsEnabled) throw new HttpError(403, 'Fähigkeiten verschenken ist in diesem Spiel aus (Einstellung „Spielleitung darf Fähigkeiten verschenken“).');
       const pl = g.players[b.playerId];
       if (!pl || !ABILITIES[b.ability]) throw new HttpError(404, 'Spieler oder Fähigkeit nicht gefunden');
       if (!usableBy(b.ability, pl.role)) throw new HttpError(400, 'Die Fähigkeit passt nicht zur Rolle');
@@ -1465,7 +1560,7 @@ async function handleAdmin(req, res, url) {
           q.status = 'rejected';
           award(pl, 'quests', -(q.pointsAwarded || 0), -1);
           if (q.rewardKey && pl.abilities[q.rewardKey] > 0) { pl.abilities[q.rewardKey]--; if (!pl.abilities[q.rewardKey]) delete pl.abilities[q.rewardKey]; }
-          inbox(pl, `❌ Die Spielleitung hat dein Foto für „${QUESTS[q.key].title}“ abgelehnt. Punkte und Belohnung wurden zurückgenommen.`, 'bad');
+          inbox(pl, `❌ Die Spielleitung hat dein Foto für „${questTitle(g, q.key)}“ abgelehnt. Punkte und Belohnung wurden zurückgenommen.`, 'bad');
         } else {
           award(pl, 'photos', -POINTS.photo, -1);
           inbox(pl, '❌ Die Spielleitung hat eins deiner Fotos abgelehnt.', 'bad');
@@ -1481,7 +1576,7 @@ async function handleAdmin(req, res, url) {
       db.gallery.push({
         id, photoId: ph.id, gameCode: g.code, gameName: g.name, ts: ph.ts, featuredAt: Date.now(),
         accountId: pl?.accountId || null, username: pl ? pl.name : 'Unbekannt', caption: cleanText(b.caption, 120),
-        quest: ph.quest ? QUESTS[ph.quest]?.title || null : null,
+        quest: ph.quest ? questTitle(g, ph.quest) : null,
       });
       if (pl) { award(pl, 'featured', POINTS.featured); inbox(pl, '⭐ Eins deiner Fotos ist jetzt in der Galerie der besten Fotos!', 'reward'); }
     } else throw new HttpError(404, 'Unbekannte Aktion');
@@ -1505,7 +1600,7 @@ function acceptLocation(g, pl, lat, lng, acc, mock, ts = Date.now(), checkNow = 
   // Distanz-Quests schrittweise mitzählen
   if (prevLoc && acc < 80 && (prevLoc.acc || 0) < 80) {
     const d = haversine(prevLoc.lat, prevLoc.lng, lat, lng);
-    for (const q of pl.quests) if (q.status === 'active' && QUESTS[q.key].kind === 'distance' && ts >= q.start) q.dist = (q.dist || 0) + d;
+    for (const q of pl.quests) if (q.status === 'active' && questDef(g, q.key).kind === 'distance' && ts >= q.start) q.dist = (q.dist || 0) + d;
   }
   addLocation(g, { pid: pl.id, lat, lng, acc: Math.round(acc), ts });
   if (checkNow && s.questsEnabled) checkQuests(g, pl, Date.now());
@@ -1535,7 +1630,7 @@ async function handleGame(req, res, url, code, rest) {
         livePenaltyEnabled: s.livePenaltyEnabled, photoGraceSec: s.photoGraceSec, livePenaltyUntil: s.livePenaltyUntil,
         abilitiesEnabled: s.abilitiesEnabled, questsEnabled: s.questsEnabled, pickupsEnabled: s.pickupsEnabled,
         antiVpn: s.antiVpn, antiSpoof: s.antiSpoof,
-        caughtBecomeHunter: s.caughtBecomeHunter, chatEnabled: s.chatEnabled, voiceEnabled: s.voiceEnabled,
+        caughtBecomeHunter: s.caughtBecomeHunter, chatEnabled: s.chatEnabled, voiceEnabled: s.voiceEnabled, allChatEnabled: s.allChatEnabled,
         spectatorsEnabled: s.spectatorsEnabled, spectatorDelaySec: s.spectatorDelaySec,
         supplyDropsEnabled: s.supplyDropsEnabled, supplyDropIntervalMin: s.supplyDropIntervalMin,
       },
@@ -1571,7 +1666,10 @@ async function handleGame(req, res, url, code, rest) {
   // Ab hier ist eine Anmeldung nötig
   const t = req.headers['x-token'] || url.searchParams.get('t') || '';
   let auth = null;
-  if (isAdminRequest(t)) auth = { admin: true };
+  if (isAdminRequest(t)) {
+    if (adminPlaysIn(g, t)) throw new HttpError(403, `${PLAYING_ADMIN} Öffne das Spiel mit deinem Spieler-Zugang.`);
+    auth = { admin: true };
+  }
   else {
     const player = Object.values(g.players).find((pl) => safeEq(pl.token, t));
     if (player) { player.lastSeen = Date.now(); auth = { player }; }
@@ -1632,8 +1730,9 @@ async function handleGame(req, res, url, code, rest) {
     const b = await readJSON(req);
     const text = cleanText(b.text, 300);
     if (!text) throw new HttpError(400, 'Nachricht fehlt');
+    const channel = chatChannel(g, pl, b.channel);
     chatGate(pl);
-    pushChat(g, pl, { text });
+    pushChat(g, pl, { text }, channel);
     save(); notify(g.code);
     return sendJSON(res, 201, { ok: true });
   }
@@ -1650,14 +1749,14 @@ async function handleGame(req, res, url, code, rest) {
     const id = rid(6);
     await fsp.writeFile(path.join(VOICE_DIR, `${g.code}_${id}.${ext}`), buf);
     const dur = Math.max(1, Math.min(60, Math.round(Number(url.searchParams.get('dur')) || 0)));
-    pushChat(g, pl, { text: '', voice: { id, ext, type, dur } });
+    pushChat(g, pl, { text: '', voice: { id, ext, type, dur } }, chatChannel(g, pl, url.searchParams.get('channel')));
     save(); notify(g.code);
     return sendJSON(res, 201, { ok: true, id });
   }
   const vm = rest.match(/^chat\/voice\/([a-f0-9]{12})$/);
   if (vm && m === 'GET') {
     const c = g.chat.find((x) => x.voice && x.voice.id === vm[1]);
-    if (!c || !(auth.admin || (pl && c.team === pl.role))) throw new HttpError(404, 'Nicht gefunden');
+    if (!c || !(auth.admin || (pl && (c.channel === 'all' ? g.settings.allChatEnabled : c.team === pl.role)))) throw new HttpError(404, 'Nicht gefunden');
     const data = await fsp.readFile(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`)).catch(() => null);
     if (!data) throw new HttpError(404, 'Nicht gefunden');
     res.writeHead(200, { 'Content-Type': c.voice.type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=86400' });
@@ -1669,7 +1768,7 @@ async function handleGame(req, res, url, code, rest) {
     if (g.status !== 'running') throw new HttpError(409, 'Das Spiel läuft gerade nicht');
     if (pl.caught) throw new HttpError(409, 'Du bist gefangen');
     const questId = url.searchParams.get('quest');
-    const quest = questId ? pl.quests.find((q) => q.id === questId && q.status === 'active' && QUESTS[q.key].kind === 'photo') : null;
+    const quest = questId ? pl.quests.find((q) => q.id === questId && q.status === 'active' && questDef(g, q.key).kind === 'photo') : null;
     if (questId && !quest) throw new HttpError(409, 'Diese Quest ist nicht (mehr) aktiv');
     if (!quest) {
       if (pl.role !== 'runner') throw new HttpError(403, 'Nur Runner laden Fotos hoch');
@@ -1687,6 +1786,35 @@ async function handleGame(req, res, url, code, rest) {
     if (quest) completeQuest(g, pl, quest);
     save(); notify(g.code);
     return sendJSON(res, 201, { ok: true, id });
+  }
+
+  // Alle Fotos als ZIP: nach Spielende für alle Mitspieler, für die Spielleitung jederzeit.
+  // Ordner pro Fotograf, Dateiname mit Uhrzeit und ggf. Quest.
+  if (rest === 'photos.zip' && m === 'GET') {
+    if (!auth.admin && g.status !== 'ended') throw new HttpError(409, 'Die Fotos gibt es nach Spielende als ZIP');
+    const photos = [...buildState(g, auth).photos].sort((a, c) => a.ts - c.ts);
+    if (!photos.length) throw new HttpError(404, 'Keine Fotos in diesem Spiel');
+    const day = new Date(g.startedAt || g.createdAt).toISOString().slice(0, 10);
+    res.writeHead(200, {
+      'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="manhunt-${g.code}-${day}.zip"; filename*=UTF-8''${encodeURIComponent(`Manhunt ${g.name} ${day}.zip`)}`,
+    });
+    const zip = new ZipWriter(res);
+    const used = new Set();
+    for (const ph of photos) {
+      const data = await fsp.readFile(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`)).catch(() => null);
+      if (!data) continue;
+      const who = safeName(g.players[ph.pid]?.name || 'Unbekannt');
+      const t = new Date(ph.ts);
+      const hhmm = `${String(t.getHours()).padStart(2, '0')}-${String(t.getMinutes()).padStart(2, '0')}-${String(t.getSeconds()).padStart(2, '0')}`;
+      const q = ph.quest ? `_${safeName(questTitle(g, ph.quest))}` : '';
+      let name = `${who}/${hhmm}${q}.jpg`;
+      for (let i = 2; used.has(name); i++) name = `${who}/${hhmm}${q}_${i}.jpg`;
+      used.add(name);
+      await zip.add(name, data, ph.ts);
+    }
+    await zip.finish();
+    return;
   }
 
   const ph = rest.match(/^photo\/([a-f0-9]{12})$/);

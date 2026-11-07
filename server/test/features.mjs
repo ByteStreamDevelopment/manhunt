@@ -184,6 +184,74 @@ pr = await api('/api/profile/Hans', { acc: A.Rita.token });
 ok(pr.friendship === 'friends' && pr.online, 'Profil zeigt Freundschaft und online');
 pushSrv.close();
 
+console.log('Chat für alle (Issue #4)');
+const gc = await api('/api/admin/games', { token: T, body: { name: 'Allchat', settings: { questsEnabled: false, pickupsEnabled: false } } });
+const cR = await api(`/api/g/${gc.code}/join`, { acc: A.Rita.token, body: { role: 'runner' } });
+const cH = await api(`/api/g/${gc.code}/join`, { acc: A.Hans.token, body: { role: 'hunter' } });
+const cS = await api(`/api/g/${gc.code}/join`, { acc: A.Zoe.token, body: { role: 'spectator' } });
+await api(`/api/admin/games/${gc.code}/start`, { token: T, body: {} });
+await api(`/api/g/${gc.code}/chat`, { token: cR.token, body: { text: 'nur Runner' } });
+await sleep(1600);
+r = await api(`/api/g/${gc.code}/chat`, { token: cR.token, body: { text: 'Hallo an alle', channel: 'all' } });
+ok(r.ok, 'Runner schreibt in den Chat für alle');
+sh = await api(`/api/g/${gc.code}/state`, { token: cH.token });
+ok(sh.chat.length === 1 && sh.chat[0].channel === 'all' && sh.chat[0].text === 'Hallo an alle', 'Hunter sieht nur die Nachricht an alle');
+st = await api(`/api/g/${gc.code}/state`, { token: cR.token });
+ok(st.chat.length === 2, 'Runner sieht Team- und Allgemein-Chat');
+ss = await api(`/api/g/${gc.code}/state`, { token: cS.token });
+ok(ss.chat.length === 1, 'Zuschauer liest den Chat für alle mit');
+r = await api(`/api/g/${gc.code}/chat`, { token: cS.token, body: { text: 'Rita ist am Bahnhof!', channel: 'all' } });
+ok(r.http === 403, 'Zuschauer dürfen im Chat für alle nicht schreiben');
+
+console.log('Fotos als ZIP (Issue #3)');
+await api(`/api/g/${gc.code}/photo`, { token: cR.token, body: jpeg });
+await sleep(1100);
+await api(`/api/g/${gc.code}/photo`, { token: cR.token, body: Buffer.concat([jpeg, Buffer.alloc(50, 9)]) });
+resp = await api(`/api/g/${gc.code}/photos.zip`, { token: cH.token, raw: true });
+ok(resp.status === 409, 'Während des Spiels kein ZIP für Spieler');
+await api(`/api/admin/games/${gc.code}/end`, { token: T, body: {} });
+resp = await api(`/api/g/${gc.code}/photos.zip`, { token: cH.token, raw: true });
+const zipBuf = Buffer.from(await resp.arrayBuffer());
+ok(resp.status === 200 && resp.headers.get('content-type') === 'application/zip' && zipBuf.readUInt32LE(0) === 0x04034b50, 'Nach Spielende: ZIP für jeden Spieler');
+const zipPath = path.join(DATA, 'test.zip'); fs.writeFileSync(zipPath, zipBuf);
+const { execFileSync } = await import('node:child_process');
+let zipOk = false, zipList = '';
+try { zipList = execFileSync('unzip', ['-l', zipPath]).toString(); execFileSync('unzip', ['-tq', zipPath]); zipOk = true; } catch (e) { zipList = String(e); }
+ok(zipOk && /Rita\/\d\d-\d\d-\d\d\.jpg/.test(zipList) && (zipList.match(/\.jpg/g) || []).length === 2, 'ZIP ist gültig (unzip -t), Ordner pro Fotograf, 2 Fotos');
+
+console.log('Spielleitung spielt mit: keine Vorteile (Issue #2)');
+const ga = await api('/api/admin/games', { token: T, body: { name: 'Fair', settings: { questsEnabled: false } } });
+const aP = await api(`/api/g/${ga.code}/join`, { acc: admin.token, body: { role: 'runner' } });
+const aH = await api(`/api/g/${ga.code}/join`, { acc: A.Hans.token, body: { role: 'hunter' } });
+await api(`/api/admin/games/${ga.code}/start`, { token: T, body: {} });
+r = await api(`/api/g/${ga.code}/state`, { token: T });
+ok(r.http === 403, 'Mitspielender Admin bekommt keine Rundumsicht');
+r = await api(`/api/admin/games/${ga.code}/give`, { token: T, body: { playerId: aP.id, ability: 'cloak' } });
+ok(r.http === 403, 'Mitspielender Admin kann sich keine Fähigkeiten geben');
+r = await api(`/api/admin/games/${ga.code}/kick`, { token: T, body: { playerId: aH.id } });
+ok(r.http === 403, 'Mitspielender Admin kann niemanden entfernen');
+r = await api(`/api/admin/games/${ga.code}/announce`, { token: T, body: { text: 'Pause in 5 Minuten' } });
+ok(r.code === ga.code, 'Durchsagen gehen weiter');
+const pwToken = (await api('/api/admin/login', { body: { password: 'test' } })).token;
+r = await api(`/api/admin/games/${ga.code}/give`, { token: pwToken, body: { playerId: aH.id, ability: 'radar' } });
+ok(r.http === 403 && /verschenken/.test(r.error), 'Verschenken ist standardmäßig aus');
+await api(`/api/admin/games/${ga.code}`, { method: 'PATCH', token: pwToken, body: { settings: { adminGiftsEnabled: true } } });
+r = await api(`/api/admin/games/${ga.code}/give`, { token: pwToken, body: { playerId: aH.id, ability: 'radar' } });
+ok(r.code === ga.code, 'Eingeschaltet: unbeteiligte Spielleitung kann verschenken');
+const list = await api('/api/admin/games', { token: T });
+ok(list.games.find((x) => x.code === ga.code).youPlay === true, 'Spieleliste zeigt „du spielst mit“');
+
+console.log('Eigene Quests (Issue #2)');
+const noBuiltin = Object.fromEntries(Object.keys((await api('/api/catalog')).quests).map((k) => [k, { enabled: false }]));
+const gq = await api('/api/admin/games', { token: T, body: { name: 'Eigene Quests', settings: {
+  questsEnabled: true, questIntervalMin: 1, pickupsEnabled: false, quests: noBuiltin,
+  customQuests: [{ title: 'Zum Rathaus', desc: 'Lauf zum Rathaus', team: 'any', kind: 'place', lat: 52.5005, lng: 13.4, radiusM: 30, points: 77, reward: 'none', icon: '🏛️' }],
+} } });
+ok(gq.settings.customQuests.length === 1 && gq.settings.customQuests[0].id, 'Eigene Quest gespeichert');
+const qR = await api(`/api/g/${gq.code}/join`, { acc: A.Rolf.token, body: { role: 'runner' } });
+await api(`/api/admin/games/${gq.code}/start`, { token: T, body: {} });
+await api(`/api/g/${gq.code}/location`, { token: qR.token, body: { lat: 52.5, lng: 13.4, acc: 5 } });
+
 console.log('Versorgungsabwurf');
 const g3 = await api('/api/admin/games', { token: T, body: { name: 'Abwurf', settings: { supplyDropsEnabled: true, supplyDropIntervalMin: 1, supplyDropWarnMin: 0, supplyDropAbilities: 3, pickupsEnabled: false, questsEnabled: false, zoneEnabled: true, zoneLat: 52.5, zoneLng: 13.4, zoneRadiusM: 800 } } });
 const Rd = await api(`/api/g/${g3.code}/join`, { acc: A.Rolf.token, body: { role: 'runner' } });
@@ -195,6 +263,14 @@ st = await api(`/api/g/${g3.code}/state`, { token: Rd.token });
 ok(st.messages.some((m) => m.text.includes('Versorgungsabwurf')), 'Abwurf wird angekündigt');
 r = await api(`/api/g/${g3.code}/pickup`, { token: Rd.token, body: { id: drop.id, lat: drop.lat, lng: drop.lng, acc: 5 } });
 ok(r.abilities?.length === 3, `Abwurf enthält 3 Fähigkeiten: ${r.abilities}`);
+
+console.log('Eigene Quests – Auswertung');
+let cq = null;
+for (let i = 0; i < 20 && !cq; i++) { st = await api(`/api/g/${gq.code}/state`, { token: qR.token }); cq = st.self.quests[0]; if (!cq) await sleep(5000); }
+ok(cq?.title === 'Zum Rathaus' && cq.custom && cq.target?.lat === 52.5005, 'Eigene Ort-Quest wird zugeteilt, mit Titel und Ziel');
+await api(`/api/g/${gq.code}/location`, { token: qR.token, body: { lat: 52.5005, lng: 13.4, acc: 5 } });
+st = await api(`/api/g/${gq.code}/state`, { token: qR.token });
+ok(st.self.quests[0]?.status === 'done' && st.self.points >= 77, 'Am Rathaus angekommen: Quest geschafft, 77 Punkte');
 
 console.log('IP hinter Proxy');
 await stop(); await start({ TRUST_PROXY: 'never' }); // wie ein direkt aus dem Internet erreichbarer Server

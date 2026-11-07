@@ -25,7 +25,7 @@ data class Player(
     val converted: Boolean = false,
 )
 
-data class PhotoRef(val id: String, val pid: String, val ts: Long, val quest: String? = null)
+data class PhotoRef(val id: String, val pid: String, val ts: Long, val quest: String? = null, val questTitle: String? = null)
 data class Msg(val id: String, val ts: Long, val text: String, val kind: String)
 
 data class Settings(
@@ -56,6 +56,7 @@ data class Settings(
     val supplyDropAbilities: Int = 2,
     val chatEnabled: Boolean = true,
     val voiceEnabled: Boolean = true,
+    val allChatEnabled: Boolean = false,
     val spectatorDelaySec: Int = 120,
 )
 
@@ -70,12 +71,21 @@ data class GameInfo(
 
 data class AbilityCount(val key: String, val count: Int)
 data class QuestTarget(val lat: Double, val lng: Double, val name: String, val radiusM: Double)
-data class Quest(val id: String, val key: String, val status: String, val start: Long, val until: Long, val target: QuestTarget?, val progress: Int?)
+data class Quest(
+    val id: String, val key: String, val status: String, val start: Long, val until: Long, val target: QuestTarget?, val progress: Int?,
+    /** Texte direkt vom Server (nötig für eigene Quests der Spielleitung, die nicht im Katalog stehen) */
+    val title: String? = null, val desc: String? = null, val icon: String? = null, val kind: String? = null, val points: Int? = null,
+    val custom: Boolean = false,
+)
 data class InboxMsg(val id: String, val ts: Long, val text: String, val kind: String)
 data class Effect(val id: String, val key: String, val team: String, val byName: String?, val until: Long, val onMe: Boolean)
 data class Cooldown(val key: String, val until: Long)
 data class VoiceRef(val id: String, val dur: Int, val type: String)
-data class ChatMsg(val id: String, val ts: Long, val pid: String, val name: String, val team: String, val text: String, val voice: VoiceRef?)
+data class ChatMsg(
+    val id: String, val ts: Long, val pid: String, val name: String, val team: String, val text: String, val voice: VoiceRef?,
+    /** team = nur das eigene Team, all = alle im Spiel */
+    val channel: String = "team",
+)
 data class Pickup(
     val id: String, val lat: Double, val lng: Double, val name: String, val until: Long,
     /** Versorgungsabwurf: mehrere Fähigkeiten, erst ab activeAt einsammelbar */
@@ -154,6 +164,14 @@ data class AbilityDef(val key: String, val team: String, val icon: String, val n
 data class BadgeDef(val key: String, val icon: String, val name: String, val desc: String)
 data class QuestDef(val key: String, val team: String, val kind: String, val icon: String, val title: String, val desc: String, val minutes: Int, val points: Int)
 data class Catalog(val abilities: Map<String, AbilityDef>, val quests: Map<String, QuestDef>, val badges: Map<String, BadgeDef> = emptyMap()) {
+    /** Definition für eine Quest im Spiel: Server-Texte (eigene Quests) haben Vorrang vor dem Katalog */
+    fun quest(q: Quest): QuestDef {
+        val base = quests[q.key] ?: QuestDef(q.key, "any", q.kind ?: "photo", "⭐", q.key, "", 0, 0)
+        return base.copy(
+            title = q.title ?: base.title, desc = q.desc ?: base.desc, icon = q.icon ?: base.icon,
+            kind = q.kind ?: base.kind, points = q.points ?: base.points,
+        )
+    }
     fun ability(k: String) = abilities[k] ?: AbilityDef(k, "any", "✨", k, "", 0, null)
     fun quest(k: String) = quests[k] ?: QuestDef(k, "any", "other", "❓", k, "", 0, 0)
 }
@@ -170,6 +188,8 @@ data class AdminGame(
     val spectators: Int, val photos: Int, val flagged: List<String>,
     /** Einstellungen als JSON (zum Bearbeiten in der App) */
     val settingsJson: String = "{}",
+    /** Die Spielleitung spielt selbst mit -> keine Vorteile (Karte, Spieler, Fotos gesperrt) */
+    val youPlay: Boolean = false,
 )
 
 fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").objects().map { g ->
@@ -178,6 +198,7 @@ fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").ob
         g.optInt("spectators"), g.optInt("photos"),
         g.optJSONArray("flagged")?.objects()?.map { it.optString("name") } ?: emptyList(),
         g.optJSONObject("settings")?.toString() ?: "{}",
+        g.optBoolean("youPlay"),
     )
 }
 
@@ -372,6 +393,7 @@ fun parseState(j: JSONObject): GameState {
             pickupCollectM = s.optInt("pickupCollectM", 40),
             supplyDropAbilities = s.optInt("supplyDropAbilities", 2),
             chatEnabled = s.optBoolean("chatEnabled", false),
+            allChatEnabled = s.optBoolean("allChatEnabled", false),
             voiceEnabled = s.optBoolean("voiceEnabled", false),
             spectatorDelaySec = s.optInt("spectatorDelaySec", 120),
         ),
@@ -385,6 +407,8 @@ fun parseState(j: JSONObject): GameState {
                     q.getString("id"), q.getString("key"), q.getString("status"), q.getLong("start"), q.getLong("until"),
                     t?.let { QuestTarget(it.getDouble("lat"), it.getDouble("lng"), it.optString("name"), it.optDouble("radiusM", 40.0)) },
                     if (q.has("progress") && !q.isNull("progress")) q.getInt("progress") else null,
+                    q.strOrNull("title"), q.strOrNull("desc"), q.strOrNull("icon"), q.strOrNull("kind"),
+                    if (q.has("points")) q.optInt("points") else null, q.optBoolean("custom"),
                 )
             } ?: emptyList(),
             inbox = me.optJSONArray("inbox")?.objects()?.map { InboxMsg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) } ?: emptyList(),
@@ -399,7 +423,7 @@ fun parseState(j: JSONObject): GameState {
             spectatorDelaySec = me.optInt("spectatorDelaySec"),
         ),
         players = players,
-        photos = j.getJSONArray("photos").objects().map { PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts"), it.strOrNull("quest")) },
+        photos = j.getJSONArray("photos").objects().map { PhotoRef(it.getString("id"), it.getString("pid"), it.getLong("ts"), it.strOrNull("quest"), it.strOrNull("questTitle")) },
         messages = j.getJSONArray("messages").objects().map { Msg(it.getString("id"), it.getLong("ts"), it.getString("text"), it.optString("kind")) },
         effects = j.optJSONArray("effects")?.objects()?.map {
             Effect(it.getString("id"), it.getString("key"), it.optString("team"), it.strOrNull("byName"), it.getLong("until"), it.optBoolean("onMe"))
@@ -409,6 +433,7 @@ fun parseState(j: JSONObject): GameState {
             ChatMsg(
                 c.getString("id"), c.getLong("ts"), c.optString("pid"), c.optString("name"), c.optString("team"), c.optString("text"),
                 v?.let { VoiceRef(it.getString("id"), it.optInt("dur"), it.optString("type")) },
+                c.optString("channel", "team"),
             )
         } ?: emptyList(),
         pickups = j.optJSONArray("pickups")?.objects()?.map {

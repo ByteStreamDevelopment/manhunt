@@ -179,15 +179,18 @@ object Api {
 
     /* ---------------- Team-Chat ---------------- */
 
-    fun sendChat(code: String, token: String, text: String) {
-        json(post("/api/g/$code/chat", token, JSONObject().put("text", text)))
+    fun sendChat(code: String, token: String, text: String, channel: String = "team") {
+        json(post("/api/g/$code/chat", token, JSONObject().put("text", text).put("channel", channel)))
     }
 
-    fun sendVoice(code: String, token: String, audio: ByteArray, durSec: Int) {
-        val req = Request.Builder().url(url("/api/g/$code/chat/voice?dur=$durSec")).header("x-token", token)
+    fun sendVoice(code: String, token: String, audio: ByteArray, durSec: Int, channel: String = "team") {
+        val req = Request.Builder().url(url("/api/g/$code/chat/voice?dur=$durSec&channel=$channel")).header("x-token", token)
             .post(audio.toRequestBody("audio/mp4".toMediaType())).build()
         call(req)
     }
+
+    /** Download-Adresse aller Fotos als ZIP (nach Spielende; Spielleitung jederzeit). */
+    fun photosZipUrl(code: String, token: String): String = url("/api/g/$code/photos.zip?t=" + URLEncoder.encode(token, "UTF-8"))
 
     fun voiceBytes(code: String, token: String, id: String): ByteArray = call(get("/api/g/$code/chat/voice/$id", token))
 

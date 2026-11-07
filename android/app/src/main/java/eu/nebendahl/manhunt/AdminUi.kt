@@ -131,9 +131,10 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                     "${g.runners} Runner · ${g.hunters} Hunter · ${g.caught} gefangen · ${g.spectators} Zuschauer · ${g.photos} Fotos",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
+                                if (g.youPlay) Text("🎮 Du spielst mit – Karte, Spieler und Fotos sind gesperrt, damit es fair bleibt.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF2BC0F))
                                 if (g.flagged.isNotEmpty()) Text("⚠️ Verdacht: ${g.flagged.joinToString()}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(onClick = { open = g.code }) { Text("Öffnen") }
+                                    if (!g.youPlay) Button(onClick = { open = g.code }) { Text("Öffnen") }
                                     when (g.status) {
                                         "lobby" -> Button(onClick = { act(g, "start") }, colors = ButtonDefaults.buttonColors(containerColor = C_GREEN)) { Text("Starten") }
                                         "running" -> Button(onClick = { confirm = g to "end" }, colors = ButtonDefaults.buttonColors(containerColor = C_RED, contentColor = Color.White)) { Text("Beenden") }
@@ -322,10 +323,16 @@ private fun AdminPhotos(st: GameState, token: String, onFeature: (PhotoRef, Stri
     var open by remember { mutableStateOf<PhotoRef?>(null) }
     val photos = st.photos.sortedByDescending { it.ts }
     if (photos.isEmpty()) { Text("Noch keine Fotos.", Modifier.padding(16.dp)); return }
+    val ctx = LocalContext.current
     LazyVerticalGrid(
         columns = GridCells.Fixed(2), contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            OutlinedButton(onClick = { downloadFile(ctx, Api.photosZipUrl(st.game.code, token), "Manhunt-${st.game.code}-Fotos.zip") }, modifier = Modifier.fillMaxWidth()) {
+                Text("⬇️ Alle als ZIP")
+            }
+        }
         items(photos, key = { it.id }) { ph ->
             val bmp = rememberAdminPhoto(st.game.code, token, ph.id)
             Card(Modifier.fillMaxWidth().aspectRatio(1f).clickable { open = ph }) {
@@ -333,7 +340,7 @@ private fun AdminPhotos(st: GameState, token: String, onFeature: (PhotoRef, Stri
                     if (bmp != null) Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else CircularProgressIndicator(Modifier.align(Alignment.Center))
                     Text(
-                        "${names[ph.pid] ?: "?"}" + (ph.quest?.let { q -> " · " + (cat?.quest(q)?.icon ?: "📜") } ?: ""),
+                        "${names[ph.pid] ?: "?"}" + (if (ph.quest != null) " · 📜" else ""),
                         Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color(0x99000000)).padding(4.dp),
                         color = Color.White, style = MaterialTheme.typography.labelSmall,
                     )
@@ -348,7 +355,7 @@ private fun AdminPhotos(st: GameState, token: String, onFeature: (PhotoRef, Stri
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val bmp = rememberAdminPhoto(st.game.code, token, ph.id)
                     if (bmp != null) Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
-                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> cat?.quest(q)?.let { " · Quest: ${it.icon} ${it.title}" } } ?: ""))
+                    Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> " · Quest: " + (ph.questTitle ?: cat?.quest(q)?.title ?: q) } ?: ""))
                     OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("Bildunterschrift (optional)") }, modifier = Modifier.fillMaxWidth())
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(onClick = { open = null; onFeature(ph, caption) }) { Text("⭐ Galerie") }

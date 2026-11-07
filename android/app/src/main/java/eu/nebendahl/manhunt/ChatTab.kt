@@ -113,20 +113,27 @@ private class VoiceRecorder(private val ctx: Context) {
 fun ChatTab(st: GameState) {
     var mode by rememberSaveable { mutableStateOf(if (st.settings.chatEnabled && st.self.role != "admin") "chat" else "news") }
     val ctx = LocalContext.current
-    LaunchedEffect(mode) { if (mode == "chat") Notif.clearChat(ctx) }
+    LaunchedEffect(mode) { if (mode == "chat" || mode == "all") Notif.clearChat(ctx) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (st.settings.chatEnabled) FilterChip(selected = mode == "chat", onClick = { mode = "chat" }, label = { Text("💬 Team-Chat") })
+            if (st.settings.chatEnabled) FilterChip(selected = mode == "chat", onClick = { mode = "chat" }, label = { Text("💬 Team") })
+            if (st.settings.chatEnabled && st.settings.allChatEnabled) FilterChip(selected = mode == "all", onClick = { mode = "all" }, label = { Text("🌍 Alle") })
             FilterChip(selected = mode == "news", onClick = { mode = "news" }, label = { Text("📣 Meldungen") })
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (mode == "chat" && st.settings.chatEnabled) TeamChat(st) else MessagesList(st)
+            when {
+                mode == "chat" && st.settings.chatEnabled -> TeamChat(st, "team")
+                mode == "all" && st.settings.chatEnabled && st.settings.allChatEnabled -> TeamChat(st, "all")
+                else -> MessagesList(st)
+            }
         }
     }
 }
 
 @Composable
-private fun TeamChat(st: GameState) {
+private fun TeamChat(st: GameState, channel: String) {
+    // Spielleitung sieht alle Kanäle; sonst nur den gewählten
+    val msgs = st.chat.filter { st.self.role == "admin" || it.channel == channel }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var text by rememberSaveable { mutableStateOf("") }
@@ -138,7 +145,7 @@ private fun TeamChat(st: GameState) {
     val player = remember { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember { mutableStateOf<String?>(null) }
     DisposableEffect(Unit) { onDispose { recorder.cancel(); player.value?.release() } }
-    LaunchedEffect(st.chat.size) { if (st.chat.isNotEmpty()) listState.animateScrollToItem(st.chat.size - 1) }
+    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size - 1) }
     LaunchedEffect(recording) { while (recording) { recSeconds = ((System.currentTimeMillis() - recorder.startedAt) / 1000).toInt(); delay(250) } }
 
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -148,7 +155,7 @@ private fun TeamChat(st: GameState) {
         val t = text.trim(); if (t.isEmpty()) return
         scope.launch {
             busy = true
-            try { GameRepository.sendChat(t); text = "" } catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_SHORT).show() } finally { busy = false }
+            try { GameRepository.sendChat(t, channel); text = "" } catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_SHORT).show() } finally { busy = false }
         }
     }
     fun play(m: ChatMsg) {
@@ -169,16 +176,18 @@ private fun TeamChat(st: GameState) {
         }
     }
     val teamName = when (st.self.role) { "runner" -> "Runner"; "hunter" -> "Hunter"; "spectator" -> "Zuschauer"; else -> "alle Teams" }
-    val canWrite = st.self.role != "admin"
+    // Zuschauer lesen im Chat für alle nur mit (sonst könnten sie Positionen verraten)
+    val canWrite = st.self.role != "admin" && !(channel == "all" && st.self.role == "spectator")
 
     Column(Modifier.fillMaxSize().imePadding()) {
         Text(
-            "Nur dein Team ($teamName) liest mit.",
+            if (channel == "all") "🌍 Hier lesen ALLE mit – auch das andere Team!" + (if (st.self.role == "spectator") " Als Zuschauer liest du nur mit." else "")
+            else "Nur dein Team ($teamName) liest mit.",
             Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (st.chat.isEmpty()) item { Text("Noch keine Nachrichten.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(st.chat, key = { it.id }) { m ->
+            if (msgs.isEmpty()) item { Text("Noch keine Nachrichten.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(msgs, key = { it.id }) { m ->
                 val mine = m.pid == st.self.id
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                     Surface(
@@ -188,7 +197,8 @@ private fun TeamChat(st: GameState) {
                     ) {
                         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                             Text(
-                                "${m.name}${if (st.self.role == "admin") " (${roleName(m.team)})" else ""} · ${clock(m.ts)}",
+                                (if (st.self.role == "admin" && m.channel == "all") "[Alle] " else "") +
+                                    "${m.name}${if (st.self.role == "admin" || channel == "all") " (${roleName(m.team)})" else ""} · ${clock(m.ts)}",
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             val v = m.voice
@@ -229,7 +239,7 @@ private fun TeamChat(st: GameState) {
                                         val res = recorder.stop()
                                         if (res == null) Toast.makeText(ctx, "Zu kurz – gedrückt halten zum Sprechen", Toast.LENGTH_SHORT).show()
                                         else scope.launch {
-                                            try { withContext(Dispatchers.IO) { GameRepository.sendVoice(res.first, res.second) } }
+                                            try { withContext(Dispatchers.IO) { GameRepository.sendVoice(res.first, res.second, channel) } }
                                             catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_SHORT).show() }
                                         }
                                     },

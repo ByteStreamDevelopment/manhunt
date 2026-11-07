@@ -324,14 +324,14 @@ object GameRepository {
 
     /* ---------------- Team-Chat ---------------- */
 
-    suspend fun sendChat(text: String) {
+    suspend fun sendChat(text: String, channel: String = "team") {
         val s = session.value ?: return
-        withContext(Dispatchers.IO) { Api.sendChat(s.code, s.token, text); runCatching { refresh(s) } }
+        withContext(Dispatchers.IO) { Api.sendChat(s.code, s.token, text, channel); runCatching { refresh(s) } }
     }
 
-    suspend fun sendVoice(audio: ByteArray, durSec: Int) {
+    suspend fun sendVoice(audio: ByteArray, durSec: Int, channel: String = "team") {
         val s = session.value ?: return
-        withContext(Dispatchers.IO) { Api.sendVoice(s.code, s.token, audio, durSec); runCatching { refresh(s) } }
+        withContext(Dispatchers.IO) { Api.sendVoice(s.code, s.token, audio, durSec, channel); runCatching { refresh(s) } }
     }
 
     /** Sprachnachricht als Datei im Cache (zum Abspielen mit MediaPlayer). */

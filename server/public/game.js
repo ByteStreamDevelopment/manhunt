@@ -32,6 +32,7 @@
     const deg = ((Math.atan2(y, x) / r) + 360) % 360;
     return ['Norden', 'Nordosten', 'Osten', 'Südosten', 'Süden', 'Südwesten', 'Westen', 'Nordwesten'][Math.round(deg / 45) % 8];
   }
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const roleName = (r) => ({ runner: 'Runner', hunter: 'Hunter', admin: 'Spielleitung' }[r] || r);
   const card = (cls, ...kids) => h('div', { class: `card ${cls || ''}` }, ...kids);
   const clk = (kind, ts) => h('span', { 'data-clock': kind, 'data-ts': String(ts) }, '…');
@@ -250,9 +251,9 @@
     }
     for (const q of (S.self.quests || [])) {
       if (q.status !== 'active' || !q.target) continue;
-      const d = CAT.quests[q.key] || {};
-      const icon = L.divIcon({ className: '', html: `<div class="pickup-pin">${d.icon || '🚩'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
-      layers.extras.push(L.marker([q.target.lat, q.target.lng], { icon }).addTo(map).bindPopup(`Quest: ${d.title || ''} – ${q.target.name}`),
+      const d = { ...(CAT.quests[q.key] || {}), ...(q.title ? { title: q.title, icon: q.icon } : {}) };
+      const icon = L.divIcon({ className: '', html: `<div class="pickup-pin">${esc(d.icon || '🚩')}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      layers.extras.push(L.marker([q.target.lat, q.target.lng], { icon }).addTo(map).bindPopup(h('div', {}, `Quest: ${d.title || ''} – ${q.target.name}`)),
         L.circle([q.target.lat, q.target.lng], { radius: q.target.radiusM, color: '#2a62d9', weight: 2, dashArray: '6 6', fillOpacity: 0.05 }).addTo(map));
     }
     if (!didFit) fitAll(true);
@@ -414,6 +415,8 @@
     if (isPlayer() && g.status !== 'ended') kids.push(trackingCard());
     if (me().converted && g.status === 'running') kids.push(card('gold', h('h3', {}, '🔄 Seitenwechsel'), h('p', {}, 'Du wurdest gefangen und jagst jetzt als Hunter mit.')));
     if (g.status === 'ended') kids.push(replayCard());
+    if (g.status === 'ended' && S.photos.length) kids.push(card('stack', h('h3', {}, '📷 Alle Fotos'), h('p', { class: 'small muted' }, `${S.photos.length} Fotos, sortiert nach Fotograf.`),
+      h('a', { class: 'btn', href: `/api/g/${CODE}/photos.zip?t=${encodeURIComponent(TOKEN)}` }, '⬇️ Als ZIP herunterladen')));
     if (isPlayer() && g.status !== 'ended') kids.push(inviteCard());
     kids.push(MH.pushCard());
     if (r === 'runner' && s.photosEnabled && g.status !== 'ended') kids.push(photoCard());
@@ -451,7 +454,7 @@
     kids.push(card('', h('h3', {}, `Deine Fähigkeiten`), abil.length ? h('div', { class: 'abil' }, abil) : h('p', { class: 'muted' }, 'Keine. Schaff Quests oder sammle Fähigkeiten auf der Karte ein (🎁).')));
     // Quests
     const qs = (sf.quests || []).slice().reverse().map((q) => {
-      const d = CAT.quests[q.key] || { icon: '', title: q.key, desc: '' };
+      const d = { ...(CAT.quests[q.key] || { icon: '', title: q.key, desc: '' }), ...(q.title ? { title: q.title, desc: q.desc, icon: q.icon, kind: q.kind, points: q.points } : {}) };
       const extra = [];
       if (q.status === 'active') {
         extra.push(h('div', { class: 'small' }, 'Noch ', clk('until', q.until)));
@@ -489,25 +492,29 @@
     catch (e) { toast(e.message); }
   }
   /* ---------------- Team-Chat mit Sprachnachrichten ---------------- */
-  let chatSig = '', recorder = null, recChunks = [], recStart = 0;
+  let chatSig = '', recorder = null, recChunks = [], recStart = 0, chatChannel = 'team';
   function renderChat(force) {
     const el = $('#tab-chat'); if (!el || !S) return;
-    const list = S.chat || [];
-    const sig = list.map((c) => c.id).join(',');
+    const allOn = S.settings.allChatEnabled && S.settings.chatEnabled;
+    if (!allOn) chatChannel = 'team';
+    const list = (S.chat || []).filter((c) => me().role === 'admin' || (c.channel || 'team') === chatChannel);
+    const sig = chatChannel + list.map((c) => c.id).join(',');
     if (!force && sig === chatSig && el.childElementCount) return;
     chatSig = sig;
-    const team = { runner: 'Runner', hunter: 'Hunter', spectator: 'Zuschauer', admin: 'alle Teams' }[me().role] || '';
+    const team = chatChannel === 'all' ? 'alle' : { runner: 'Runner', hunter: 'Hunter', spectator: 'Zuschauer', admin: 'alle Teams' }[me().role] || '';
     const items = list.map((c) => h('li', { class: c.pid === me().id ? 'mine' : '' },
-      h('div', { class: 'who' }, `${c.name}${me().role === 'admin' ? ` (${c.team})` : ''} · ${clock(c.ts)}`),
+      h('div', { class: 'who' }, `${c.channel === 'all' && me().role === 'admin' ? '[Alle] ' : ''}${c.name}${me().role === 'admin' || chatChannel === 'all' ? ` (${{ runner: 'Runner', hunter: 'Hunter', spectator: 'Zuschauer' }[c.team] || c.team})` : ''} · ${clock(c.ts)}`),
       c.voice ? h('audio', { controls: true, preload: 'none', src: `/api/g/${CODE}/chat/voice/${c.voice.id}?t=${encodeURIComponent(TOKEN)}` }) : h('div', {}, c.text)));
     const input = h('input', { type: 'text', maxlength: '300', placeholder: 'Nachricht ans Team …' });
     const send = async () => {
       const t = input.value.trim(); if (!t) return;
-      try { await api(`/api/g/${CODE}/chat`, { method: 'POST', token: TOKEN, body: { text: t } }); input.value = ''; refresh(); }
+      try { await api(`/api/g/${CODE}/chat`, { method: 'POST', token: TOKEN, body: { text: t, channel: chatChannel } }); input.value = ''; refresh(); }
       catch (e) { toast(e.message); }
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-    const canWrite = me().role !== 'admin' && S.settings.chatEnabled;
+    const canWrite = me().role !== 'admin' && S.settings.chatEnabled && !(chatChannel === 'all' && me().role === 'spectator');
+    const switcher = allOn && me().role !== 'admin' ? h('div', { class: 'tabs chattabs' }, [['team', '👥 Team'], ['all', '🌍 Alle']].map(([v, l]) =>
+      h('button', { 'aria-selected': String(chatChannel === v), onclick: () => { chatChannel = v; renderChat(true); } }, l))) : null;
     const rec = h('button', { class: 'btn rec', title: 'Gedrückt halten zum Sprechen' }, '🎙️');
     const startRec = async (e) => {
       e.preventDefault();
@@ -524,7 +531,7 @@
           const dur = Math.round((Date.now() - recStart) / 1000);
           recorder = null; rec.textContent = '🎙️';
           if (dur < 1) { toast('Zu kurz – gedrückt halten'); return; }
-          try { await api(`/api/g/${CODE}/chat/voice?dur=${dur}`, { method: 'POST', token: TOKEN, body: blob, contentType: blob.type }); refresh(); }
+          try { await api(`/api/g/${CODE}/chat/voice?dur=${dur}&channel=${chatChannel}`, { method: 'POST', token: TOKEN, body: blob, contentType: blob.type }); refresh(); }
           catch (x) { toast(x.message); }
         };
         recorder.start();
@@ -537,8 +544,10 @@
     rec.addEventListener('pointerup', stopRec);
     rec.addEventListener('pointerleave', stopRec);
     el.replaceChildren(card('',
-      h('h3', {}, `💬 Team-Chat (${team})`),
-      items.length ? h('ul', { class: 'chat' }, items) : h('p', { class: 'muted' }, 'Noch keine Nachrichten. Nur dein Team kann mitlesen.'),
+      switcher,
+      h('h3', {}, chatChannel === 'all' ? '🌍 Chat für alle' : `💬 Team-Chat (${team})`),
+      items.length ? h('ul', { class: 'chat' }, items) : h('p', { class: 'muted' }, chatChannel === 'all' ? 'Noch keine Nachrichten. Hier lesen alle mit – auch das andere Team!' : 'Noch keine Nachrichten. Nur dein Team kann mitlesen.'),
+      chatChannel === 'all' && me().role === 'spectator' ? h('p', { class: 'small muted' }, 'Als Zuschauer liest du hier nur mit.') : null,
       canWrite ? h('div', { class: 'chatbar' }, input, h('button', { class: 'btn', onclick: send }, 'Senden'), S.settings.voiceEnabled ? rec : null) : null));
   }
 
@@ -765,7 +774,7 @@
     $('#app').hidden = false;
     $('#gameName').textContent = ident ? '' : 'Spielleitung';
     document.addEventListener('pointerdown', unlockAudio, { once: true });
-    for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => selectTab(b.dataset.tab));
+    for (const b of document.querySelectorAll('.dock > .tabs button')) b.addEventListener('click', () => selectTab(b.dataset.tab));
     $('#photoInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; onPhotoChosen(f); });
     $('#lbClose').addEventListener('click', () => $('#lightbox').close());
     $('#lightbox').addEventListener('click', (e) => { if (e.target === $('#lightbox')) $('#lightbox').close(); });
@@ -780,7 +789,7 @@
   }
   function selectTab(name) {
     tab = name;
-    for (const b of document.querySelectorAll('.tabs button')) {
+    for (const b of document.querySelectorAll('.dock > .tabs button')) {
       const on = b.dataset.tab === name;
       b.setAttribute('aria-selected', String(on));
       $(`#tab-${b.dataset.tab}`).hidden = !on;
