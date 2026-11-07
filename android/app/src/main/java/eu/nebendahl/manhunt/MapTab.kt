@@ -336,11 +336,13 @@ private fun redrawState(m: MapView, st: GameState, fix: Loc?, serverNow: Long) {
             Marker(m).apply {
                 id = "pickup:" + pu.id
                 position = gp
-                title = "🎁 ${pu.name}"
-                snippet = "Hier liegt eine Fähigkeit. Lauf hin, um sie einzusammeln!" +
+                title = (if (pu.drop) "📦 " else "🎁 ") + pu.name
+                snippet = (if (!pu.drop) "Hier liegt eine Fähigkeit. Lauf hin, um sie einzusammeln!"
+                else if (pu.landed(serverNow)) "Versorgungsabwurf mit ${st.settings.supplyDropAbilities} Fähigkeiten – schnell hin!"
+                else "Versorgungsabwurf – landet in ${fmtDur((pu.activeAt ?: serverNow) - serverNow)}") +
                     (fix?.let { "\nEntfernung: " + distTextRounded(haversine(it.lat, it.lng, pu.lat, pu.lng)) } ?: "")
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                icon = emojiPin(ctx, "🎁", C_ZONE)
+                icon = emojiPin(ctx, if (pu.drop) "📦" else "🎁", if (pu.drop) C_LIVE else C_ZONE)
             },
         )
     }

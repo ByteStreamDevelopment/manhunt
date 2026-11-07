@@ -53,6 +53,7 @@ data class Settings(
     val questsEnabled: Boolean = true,
     val pickupsEnabled: Boolean = true,
     val pickupCollectM: Int = 40,
+    val supplyDropAbilities: Int = 2,
     val chatEnabled: Boolean = true,
     val voiceEnabled: Boolean = true,
     val spectatorDelaySec: Int = 120,
@@ -75,7 +76,13 @@ data class Effect(val id: String, val key: String, val team: String, val byName:
 data class Cooldown(val key: String, val until: Long)
 data class VoiceRef(val id: String, val dur: Int, val type: String)
 data class ChatMsg(val id: String, val ts: Long, val pid: String, val name: String, val team: String, val text: String, val voice: VoiceRef?)
-data class Pickup(val id: String, val lat: Double, val lng: Double, val name: String, val until: Long)
+data class Pickup(
+    val id: String, val lat: Double, val lng: Double, val name: String, val until: Long,
+    /** Versorgungsabwurf: mehrere Fähigkeiten, erst ab activeAt einsammelbar */
+    val drop: Boolean = false, val activeAt: Long? = null,
+) {
+    fun landed(serverNow: Long) = !drop || (activeAt ?: 0L) <= serverNow
+}
 
 data class SelfInfo(
     val id: String?,
@@ -135,6 +142,8 @@ data class LobbyInfo(
     val voiceEnabled: Boolean = false,
     val spectatorsEnabled: Boolean = false,
     val spectatorDelaySec: Int = 120,
+    val supplyDropsEnabled: Boolean = false,
+    val supplyDropIntervalMin: Int = 15,
 )
 
 /* ---------------- Accounts, Katalog, Bestenliste, Galerie ---------------- */
@@ -159,6 +168,8 @@ data class BoardRow(
 data class AdminGame(
     val code: String, val name: String, val status: String, val runners: Int, val hunters: Int, val caught: Int,
     val spectators: Int, val photos: Int, val flagged: List<String>,
+    /** Einstellungen als JSON (zum Bearbeiten in der App) */
+    val settingsJson: String = "{}",
 )
 
 fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").objects().map { g ->
@@ -166,7 +177,66 @@ fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").ob
         g.getString("code"), g.optString("name"), g.optString("status"), g.optInt("runners"), g.optInt("hunters"), g.optInt("caught"),
         g.optInt("spectators"), g.optInt("photos"),
         g.optJSONArray("flagged")?.objects()?.map { it.optString("name") } ?: emptyList(),
+        g.optJSONObject("settings")?.toString() ?: "{}",
     )
+}
+
+/* ---------------- Profil, Saisons, Freunde ---------------- */
+data class HistoryEntry(
+    val code: String, val name: String, val endedAt: Long, val role: String, val converted: Boolean,
+    val caught: Boolean, val result: String, val points: Int, val catches: Int,
+)
+data class SeasonEntry(val season: String, val points: Int, val games: Int, val wins: Int, val catches: Int, val rank: Int?, val of: Int?)
+data class Profile(
+    val username: String, val isAdmin: Boolean, val createdAt: Long, val online: Boolean, val self: Boolean,
+    /** none | requested | incoming | friends | null (nicht angemeldet / eigenes Profil) */
+    val friendship: String?,
+    val stats: Map<String, Int>, val badges: Map<String, Long>, val history: List<HistoryEntry>, val seasons: List<SeasonEntry>,
+)
+data class Friend(val username: String, val online: Boolean, val lastSeen: Long?)
+data class Invite(val id: String, val from: String, val code: String, val gameName: String, val ts: Long)
+data class Friends(val friends: List<Friend>, val incoming: List<Friend>, val outgoing: List<Friend>, val invites: List<Invite>)
+data class Seasons(val current: String, val list: List<String>)
+
+fun parseProfile(j: JSONObject): Profile {
+    val st = j.optJSONObject("stats") ?: JSONObject()
+    val b = j.optJSONObject("badges") ?: JSONObject()
+    return Profile(
+        j.getString("username"), j.optBoolean("isAdmin"), j.optLong("createdAt"), j.optBoolean("online"), j.optBoolean("self"),
+        j.strOrNull("friendship"),
+        st.keys().asSequence().associateWith { st.optInt(it) },
+        b.keys().asSequence().associateWith { b.optLong(it) },
+        j.optJSONArray("history")?.objects()?.map {
+            HistoryEntry(
+                it.optString("code"), it.optString("name"), it.optLong("endedAt"), it.optString("role"), it.optBoolean("converted"),
+                it.optBoolean("caught"), it.optString("result"), it.optInt("points"), it.optInt("catches"),
+            )
+        } ?: emptyList(),
+        j.optJSONArray("seasons")?.objects()?.map {
+            SeasonEntry(
+                it.getString("season"), it.optInt("points"), it.optInt("games"), it.optInt("wins"), it.optInt("catches"),
+                if (it.has("rank")) it.optInt("rank") else null, if (it.has("of")) it.optInt("of") else null,
+            )
+        } ?: emptyList(),
+    )
+}
+
+fun parseFriends(j: JSONObject): Friends {
+    fun list(k: String) = j.optJSONArray(k)?.objects()?.map { Friend(it.getString("username"), it.optBoolean("online"), it.longOrNull("lastSeen")) } ?: emptyList()
+    return Friends(
+        list("friends"), list("incoming"), list("outgoing"),
+        j.optJSONArray("invites")?.objects()?.map { Invite(it.getString("id"), it.optString("from"), it.optString("code"), it.optString("gameName"), it.optLong("ts")) } ?: emptyList(),
+    )
+}
+
+fun parseSeasons(j: JSONObject) = Seasons(j.getString("current"), j.optJSONArray("seasons")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList())
+
+/** "2026-11" -> "November 2026" */
+fun seasonName(k: String): String {
+    val parts = k.split("-")
+    if (parts.size != 2) return k
+    val months = listOf("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
+    return (months.getOrNull((parts[1].toIntOrNull() ?: 1) - 1) ?: parts[1]) + " " + parts[0]
 }
 data class GalleryItem(val id: String, val username: String, val gameName: String, val ts: Long, val caption: String, val quest: String?)
 
@@ -202,6 +272,8 @@ fun parseInfo(j: JSONObject): LobbyInfo {
         voiceEnabled = s.optBoolean("voiceEnabled"),
         spectatorsEnabled = s.optBoolean("spectatorsEnabled"),
         spectatorDelaySec = s.optInt("spectatorDelaySec", 120),
+        supplyDropsEnabled = s.optBoolean("supplyDropsEnabled"),
+        supplyDropIntervalMin = s.optInt("supplyDropIntervalMin", 15),
     )
 }
 
@@ -298,6 +370,7 @@ fun parseState(j: JSONObject): GameState {
             questsEnabled = s.optBoolean("questsEnabled", false),
             pickupsEnabled = s.optBoolean("pickupsEnabled", false),
             pickupCollectM = s.optInt("pickupCollectM", 40),
+            supplyDropAbilities = s.optInt("supplyDropAbilities", 2),
             chatEnabled = s.optBoolean("chatEnabled", false),
             voiceEnabled = s.optBoolean("voiceEnabled", false),
             spectatorDelaySec = s.optInt("spectatorDelaySec", 120),
@@ -339,7 +412,7 @@ fun parseState(j: JSONObject): GameState {
             )
         } ?: emptyList(),
         pickups = j.optJSONArray("pickups")?.objects()?.map {
-            Pickup(it.getString("id"), it.getDouble("lat"), it.getDouble("lng"), it.optString("name"), it.optLong("until"))
+            Pickup(it.getString("id"), it.getDouble("lat"), it.getDouble("lng"), it.optString("name"), it.optLong("until"), it.optBoolean("drop"), it.longOrNull("activeAt"))
         } ?: emptyList(),
     )
 }

@@ -125,17 +125,28 @@ fun App(inviteCode: String?) {
     val session by GameRepository.session.collectAsState()
     val account by GameRepository.account.collectAsState()
     var screen by rememberSaveable { mutableStateOf("main") }
+    var profileOf by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCode by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { GameRepository.checkAccount(); GameRepository.loadCatalog() }
     val s = session
     val a = account
+    a?.let { FriendsWatcher(it) }
+    val openProfile: (String) -> Unit = { profileOf = it; screen = "profile" }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
-            screen == "leaderboard" -> LeaderboardScreen { screen = "main" }
+            screen == "profile" && profileOf != null -> ProfileScreen(
+                profileOf!!, onBack = { screen = "main" }, openProfile = openProfile,
+                joinGame = { c -> pendingCode = c; screen = "main" },
+            )
+            screen == "leaderboard" -> LeaderboardScreen(onBack = { screen = "main" }, openProfile = openProfile)
             screen == "gallery" -> GalleryScreen { screen = "main" }
             screen == "admin" && a != null -> AdminScreen(a) { screen = "main" }
             s != null -> GameScreen(openLeaderboard = { screen = "leaderboard" })
             a == null -> AuthScreen()
-            else -> HomeScreen(a, inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" }, openAdmin = { screen = "admin" })
+            else -> HomeScreen(
+                a, pendingCode ?: inviteCode, openLeaderboard = { screen = "leaderboard" }, openGallery = { screen = "gallery" },
+                openAdmin = { screen = "admin" }, openProfile = { openProfile(a.username) },
+            )
         }
     }
 }

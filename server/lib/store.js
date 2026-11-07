@@ -56,7 +56,7 @@ class Store {
       this.written.set('a:' + r.id, r.json);
     }
     const kv = (k, def) => { const r = this.q.kvGet.get(k); if (r) this.written.set('kv:' + k, r.v); return r ? JSON.parse(r.v) : def; };
-    return { secret: kv('secret', ''), gallery: kv('gallery', []), games, accounts };
+    return { secret: kv('secret', ''), gallery: kv('gallery', []), vapid: kv('vapid', null), games, accounts };
   }
 
   /** Übernimmt eine alte db.json (nur wenn die Datenbank noch leer ist). */
@@ -82,7 +82,7 @@ class Store {
   }
 
   /** Schreibt alles, was sich seit dem letzten Mal geändert hat, in einer Transaktion. */
-  flush({ secret, gallery, games, accounts }) {
+  flush({ secret, gallery, vapid, games, accounts }) {
     const skip = (k, v) => (k === 'locations' || k.startsWith('_') ? undefined : v);
     const writes = [];
     const seenG = new Set(), seenA = new Set();
@@ -98,7 +98,7 @@ class Store {
       if (key.startsWith('g:') && !seenG.has(key.slice(2))) writes.push(() => { this.q.gameDel.run(key.slice(2)); this.q.locDelGame.run(key.slice(2)); this.written.delete(key); });
       if (key.startsWith('a:') && !seenA.has(key.slice(2))) writes.push(() => { this.q.accDel.run(key.slice(2)); this.written.delete(key); });
     }
-    for (const [k, v] of [['secret', secret], ['gallery', gallery]]) {
+    for (const [k, v] of [['secret', secret], ['gallery', gallery], ['vapid', vapid || null]]) {
       const j = JSON.stringify(v);
       if (this.written.get('kv:' + k) !== j) writes.push(() => { this.q.kvSet.run(k, j); this.written.set('kv:' + k, j); });
     }

@@ -39,6 +39,8 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.2: Profil mit Verlauf, Saisons und Abzeichen; Freunde und Einladungen (mit Benachrichtigung, solange die App offen ist);
+  Saison-Bestenliste; Versorgungsabwürfe 📦; Spielleitung kann Spiele mit allen Einstellungen in der App anlegen und bearbeiten
 - Neu in 2.1: Team-Chat mit Sprachnachrichten (🎙️ gedrückt halten), Zuschauer-Modus, Wiederholung nach Spielende,
   Abzeichen in der Bestenliste (Eintrag antippen), Abklingzeiten, Seitenwechsel (gefangen = jetzt Hunter),
   Spielleitung in der App für Admin-Accounts, Positionen im Funkloch werden nachgereicht,

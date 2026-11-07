@@ -95,7 +95,23 @@ object Api {
 
     fun catalog(): Catalog = parseCatalog(json(get("/api/catalog")))
 
-    fun leaderboard(sort: String): List<BoardRow> = parseBoard(json(get("/api/leaderboard?sort=" + URLEncoder.encode(sort, "UTF-8"))))
+    fun leaderboard(sort: String, season: String = "all"): List<BoardRow> =
+        parseBoard(json(get("/api/leaderboard?sort=" + URLEncoder.encode(sort, "UTF-8") + "&season=" + URLEncoder.encode(season, "UTF-8"))))
+
+    fun seasons(): Seasons = parseSeasons(json(get("/api/seasons")))
+
+    fun profile(username: String, accountToken: String?): Profile {
+        val r = Request.Builder().url(url("/api/profile/" + URLEncoder.encode(username, "UTF-8").replace("+", "%20")))
+            .apply { if (accountToken != null) header("x-account", accountToken) }.build()
+        return parseProfile(json(r))
+    }
+
+    fun friends(accountToken: String): Friends =
+        parseFriends(json(Request.Builder().url(url("/api/friends")).header("x-account", accountToken).build()))
+
+    /** action: request | respond | remove | invite | invites/dismiss */
+    fun friendAction(accountToken: String, action: String, body: JSONObject): Friends =
+        parseFriends(json(post("/api/friends/$action", null, body, account = accountToken)))
 
     fun gallery(): List<GalleryItem> = parseGallery(json(get("/api/gallery")))
 
@@ -178,6 +194,18 @@ object Api {
     /* ---------------- Spielleitung (mit dem Token eines Admin-Accounts) ---------------- */
 
     fun adminGames(adminToken: String): List<AdminGame> = parseAdminGames(json(get("/api/admin/games", adminToken)))
+
+    /** Standardwerte aller Einstellungen (inkl. Fähigkeiten/Quests) und Katalog. */
+    fun adminCatalog(adminToken: String): JSONObject = json(get("/api/admin/catalog", adminToken))
+
+    fun adminCreate(adminToken: String, name: String, settings: JSONObject): String =
+        json(post("/api/admin/games", adminToken, JSONObject().put("name", name).put("settings", settings))).getString("code")
+
+    fun adminUpdate(adminToken: String, code: String, name: String, settings: JSONObject) {
+        val req = Request.Builder().url(url("/api/admin/games/$code")).header("x-token", adminToken)
+            .patch(JSONObject().put("name", name).put("settings", settings).toString().toRequestBody(JSON)).build()
+        json(req)
+    }
 
     fun adminAction(adminToken: String, code: String, action: String, body: JSONObject = JSONObject()) {
         json(post("/api/admin/games/$code/$action", adminToken, body))

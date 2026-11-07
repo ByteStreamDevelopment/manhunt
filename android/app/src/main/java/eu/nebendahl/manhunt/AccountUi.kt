@@ -212,7 +212,10 @@ fun AuthScreen() {
 /* ------------------------------------------------------------------ */
 
 @Composable
-fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Unit, openGallery: () -> Unit, openAdmin: () -> Unit) {
+fun HomeScreen(
+    account: Account, inviteCode: String?, openLeaderboard: () -> Unit, openGallery: () -> Unit, openAdmin: () -> Unit, openProfile: () -> Unit,
+) {
+    val friends by GameRepository.friends.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var code by rememberSaveable(inviteCode) { mutableStateOf(inviteCode.orEmpty()) }
@@ -269,7 +272,22 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
             OutlinedButton(onClick = openLeaderboard, modifier = Modifier.weight(1f)) { Text("🏆 Bestenliste") }
             OutlinedButton(onClick = openGallery, modifier = Modifier.weight(1f)) { Text("⭐ Galerie") }
         }
+        val requests = friends?.incoming?.size ?: 0
+        OutlinedButton(onClick = openProfile, modifier = Modifier.fillMaxWidth()) {
+            Text("👤 Profil & Freunde" + if (requests > 0) " ($requests neue Anfrage${if (requests > 1) "n" else ""})" else "")
+        }
         if (account.isAdmin) Button(onClick = openAdmin, modifier = Modifier.fillMaxWidth()) { Text("👑 Spielleitung") }
+        friends?.invites?.forEach { inv ->
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF3A3410))) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("🎮 ${inv.gameName}", fontWeight = FontWeight.Bold)
+                        Text("Einladung von ${inv.from}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(onClick = { code = inv.code; info = null; lookup() }) { Text("Ansehen") }
+                }
+            }
+        }
 
         OutlinedTextField(
             value = code,
@@ -346,33 +364,42 @@ fun HomeScreen(account: Account, inviteCode: String?, openLeaderboard: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LeaderboardScreen(onBack: () -> Unit) {
+fun LeaderboardScreen(onBack: () -> Unit, openProfile: (String) -> Unit) {
     BackHandler(onBack = onBack)
     val me = GameRepository.account.collectAsState().value?.username
     val cat = GameRepository.catalog.collectAsState().value
-    var showBadges by remember { mutableStateOf<BoardRow?>(null) }
     var sort by rememberSaveable { mutableStateOf("points") }
+    var season by rememberSaveable { mutableStateOf("current") }
+    var seasons by remember { mutableStateOf<Seasons?>(null) }
     var rows by remember { mutableStateOf<List<BoardRow>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(sort) {
+    LaunchedEffect(Unit) { runCatching { seasons = withContext(Dispatchers.IO) { Api.seasons() } } }
+    LaunchedEffect(sort, season) {
         error = null
-        try { rows = withContext(Dispatchers.IO) { Api.leaderboard(sort) } } catch (e: ApiException) { error = e.message }
+        try { rows = withContext(Dispatchers.IO) { Api.leaderboard(sort, season) } } catch (e: ApiException) { error = e.message }
     }
     val sorts = listOf("points" to "Punkte", "wins" to "Siege", "catches" to "Fänge", "quests" to "Quests", "surviveMin" to "Überlebt", "featured" to "⭐ Fotos")
     Scaffold(topBar = { TopAppBar(title = { Text("🏆 Bestenliste") }, navigationIcon = { TextButton(onClick = onBack) { Text("‹ Zurück") } }) }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = season == "current", onClick = { season = "current" }, label = { Text("📅 " + (seasons?.current?.let { seasonName(it) } ?: "Diese Saison")) })
+                FilterChip(selected = season == "all", onClick = { season = "all" }, label = { Text("♾️ Ewig") })
+                seasons?.list?.filter { it != seasons?.current }?.take(6)?.forEach { k ->
+                    FilterChip(selected = season == k, onClick = { season = k }, label = { Text(seasonName(k)) })
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 sorts.forEach { (k, l) -> FilterChip(selected = sort == k, onClick = { sort = k }, label = { Text(l) }) }
             }
             when {
                 error != null -> Text(error!!, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
                 rows == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                rows!!.isEmpty() -> Text("Noch keine Spiele gespielt.", Modifier.padding(16.dp))
+                rows!!.isEmpty() -> Text(if (season == "current") "In dieser Saison wurde noch nicht gespielt." else "Noch keine Spiele gespielt.", Modifier.padding(16.dp))
                 else -> LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     itemsIndexed(rows!!) { i, r ->
                         val mine = r.username.equals(me, ignoreCase = true)
                         Card(
-                            Modifier.fillMaxWidth().clickable { showBadges = r },
+                            Modifier.fillMaxWidth().clickable { openProfile(r.username) },
                             colors = if (mine) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)) else CardDefaults.cardColors(),
                         ) {
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -395,33 +422,6 @@ fun LeaderboardScreen(onBack: () -> Unit) {
             }
         }
     }
-    showBadges?.let { BadgesDialog(it, cat) { showBadges = null } }
-}
-
-/** Alle Abzeichen: erreichte farbig, fehlende ausgegraut. */
-@Composable
-private fun BadgesDialog(row: BoardRow, cat: Catalog?, onDismiss: () -> Unit) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("🏅 ${row.username}") },
-        text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val all = cat?.badges?.values?.toList() ?: emptyList()
-                items(all.size) { idx ->
-                    val b = all[idx]
-                    val has = b.key in row.badges
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(b.icon, fontSize = 24.sp, modifier = Modifier.width(40.dp), color = if (has) Color.Unspecified else Color.Gray.copy(alpha = 0.4f))
-                        Column {
-                            Text(b.name, fontWeight = FontWeight.Bold, color = if (has) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(b.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Schließen") } },
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

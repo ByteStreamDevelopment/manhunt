@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
+import crypto from 'node:crypto';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 3800 + Math.floor(Math.random() * 90);
@@ -12,7 +14,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'manhunt-feat-'));
 let LOG = '', srv = null;
 function start(extraEnv = {}) {
   srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'server.js')], {
-    env: { ...process.env, ADMIN_PASSWORD: 'test', DATA_DIR: DATA, PORT: String(PORT), HOST: '127.0.0.1', SMTP_HOST: '', VPN_CHECK: 'off', OVERPASS_URL: 'http://127.0.0.1:1/none', ...extraEnv },
+    env: { ...process.env, PUSH_ALLOW_HTTP: '1', ADMIN_PASSWORD: 'test', DATA_DIR: DATA, PORT: String(PORT), HOST: '127.0.0.1', SMTP_HOST: '', VPN_CHECK: 'off', OVERPASS_URL: 'http://127.0.0.1:1/none', ...extraEnv },
   });
   srv.stdout.on('data', (d) => { LOG += d; });
   srv.stderr.on('data', (d) => { LOG += d; });
@@ -129,6 +131,70 @@ ok(rita.badges.includes('turncoat') && rita.badges.includes('firstCatch') && rit
 ok(rita.wins === 1, 'Übergelaufene Rita gewinnt mit den Huntern');
 st = await api(`/api/g/${C}/state`, { token: R.token });
 ok(st.self.inbox.some((m) => m.text.includes('Abzeichen')), 'Abzeichen werden gemeldet');
+
+console.log('Profil, Verlauf, Saison');
+let pr = await api('/api/profile/Rita');
+ok(pr.history?.length === 1 && pr.history[0].result === 'win' && pr.history[0].converted && pr.history[0].role === 'runner', 'Spielverlauf: als Runner gestartet, übergelaufen, gewonnen');
+ok(pr.history[0].catches === 1, 'Fänge pro Spiel im Verlauf');
+ok(pr.seasons?.[0]?.rank >= 1 && pr.seasons[0].wins === 1, `Saison ${pr.seasons?.[0]?.season}: Platz ${pr.seasons?.[0]?.rank}`);
+let lbS = await api('/api/leaderboard?season=current');
+ok(lbS.season === lbS.currentSeason && lbS.rows.some((x) => x.username === 'Rita'), 'Saison-Bestenliste (aktueller Monat)');
+lbS = await api('/api/leaderboard?season=2001-01');
+ok(lbS.rows.length === 0, 'Alte Saison ohne Einträge ist leer');
+ok((await api('/api/seasons')).seasons.includes(lbS.currentSeason), 'Saison-Liste');
+
+console.log('Freunde, Einladung, Push');
+// Mini-Push-Dienst: nimmt Benachrichtigungen an und entschlüsselt sie
+const ua = crypto.createECDH('prime256v1'); ua.generateKeys();
+const authSecret = crypto.randomBytes(16);
+const received = [];
+const pushSrv = http.createServer((req, res) => {
+  const chunks = []; req.on('data', (c) => chunks.push(c));
+  req.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const salt = body.subarray(0, 16), idlen = body[20], asPub = body.subarray(21, 21 + idlen), ct = body.subarray(21 + idlen);
+    const ecdhSecret = ua.computeSecret(asPub);
+    const ikm = Buffer.from(crypto.hkdfSync('sha256', ecdhSecret, authSecret, Buffer.concat([Buffer.from('WebPush: info\0'), ua.getPublicKey(), asPub]), 32));
+    const cek = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16));
+    const nonce = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12));
+    const d = crypto.createDecipheriv('aes-128-gcm', cek, nonce); d.setAuthTag(ct.subarray(ct.length - 16));
+    const plain = Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]);
+    received.push({ auth: req.headers.authorization, data: JSON.parse(plain.subarray(0, plain.length - 1).toString()) });
+    res.writeHead(201); res.end();
+  });
+}).listen(0, '127.0.0.1');
+await new Promise((r) => pushSrv.once('listening', r));
+const sub = { endpoint: `http://127.0.0.1:${pushSrv.address().port}/push/abc`, keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: authSecret.toString('base64url') } };
+r = await api('/api/push/subscribe', { acc: A.Hans.token, body: { subscription: sub } });
+ok(r.ok, 'Hans abonniert Push');
+r = await api('/api/friends/request', { acc: A.Rita.token, body: { username: 'Hans' } });
+ok(r.outgoing?.[0]?.username === 'Hans', 'Rita fragt Hans an');
+await sleep(300);
+ok(received.some((x) => x.data.title === 'Freundschaftsanfrage' && x.data.body.includes('Rita')), 'Hans bekommt die Anfrage als verschlüsselten Push');
+ok(received[0]?.auth?.startsWith('vapid t='), 'Push mit VAPID-Signatur');
+r = await api('/api/friends/respond', { acc: A.Hans.token, body: { username: 'Rita', accept: true } });
+ok(r.friends?.[0]?.username === 'Rita', 'Hans nimmt an – befreundet');
+const g2 = await api('/api/admin/games', { token: T, body: { name: 'Revanche' } });
+r = await api('/api/friends/invite', { acc: A.Rita.token, body: { username: 'Hans', code: g2.code } });
+r = await api('/api/friends', { acc: A.Hans.token });
+ok(r.invites?.[0]?.code === g2.code && r.invites[0].from === 'Rita', 'Hans hat eine Einladung zu „Revanche“');
+r = await api('/api/friends/invite', { acc: A.Rita.token, body: { username: 'Zoe', code: g2.code } });
+ok(r.http === 403, 'Nur Freunde können eingeladen werden');
+pr = await api('/api/profile/Hans', { acc: A.Rita.token });
+ok(pr.friendship === 'friends' && pr.online, 'Profil zeigt Freundschaft und online');
+pushSrv.close();
+
+console.log('Versorgungsabwurf');
+const g3 = await api('/api/admin/games', { token: T, body: { name: 'Abwurf', settings: { supplyDropsEnabled: true, supplyDropIntervalMin: 1, supplyDropWarnMin: 0, supplyDropAbilities: 3, pickupsEnabled: false, questsEnabled: false, zoneEnabled: true, zoneLat: 52.5, zoneLng: 13.4, zoneRadiusM: 800 } } });
+const Rd = await api(`/api/g/${g3.code}/join`, { acc: A.Rolf.token, body: { role: 'runner' } });
+await api(`/api/admin/games/${g3.code}/start`, { token: T, body: {} });
+let drop = null;
+for (let i = 0; i < 20 && !drop; i++) { await sleep(5000); drop = (await api(`/api/g/${g3.code}/state`, { token: Rd.token })).pickups.find((p) => p.drop); }
+ok(!!drop, 'Abwurf erscheint nach 1 Minute');
+st = await api(`/api/g/${g3.code}/state`, { token: Rd.token });
+ok(st.messages.some((m) => m.text.includes('Versorgungsabwurf')), 'Abwurf wird angekündigt');
+r = await api(`/api/g/${g3.code}/pickup`, { token: Rd.token, body: { id: drop.id, lat: drop.lat, lng: drop.lng, acc: 5 } });
+ok(r.abilities?.length === 3, `Abwurf enthält 3 Fähigkeiten: ${r.abilities}`);
 
 console.log('IP hinter Proxy');
 await stop(); await start({ TRUST_PROXY: 'never' }); // wie ein direkt aus dem Internet erreichbarer Server

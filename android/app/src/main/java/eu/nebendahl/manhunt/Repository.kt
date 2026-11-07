@@ -26,6 +26,8 @@ object GameRepository {
 
     val account = MutableStateFlow<Account?>(null)
     val catalog = MutableStateFlow<Catalog?>(null)
+    /** Freunde und Einladungen (vom FriendsWatcher aktuell gehalten) */
+    val friends = MutableStateFlow<Friends?>(null)
     val session = MutableStateFlow<Session?>(null)
     val state = MutableStateFlow<GameState?>(null)
     val error = MutableStateFlow<String?>(null)
@@ -88,6 +90,7 @@ object GameRepository {
     fun logout() {
         prefs?.edit()?.remove("accToken")?.remove("accId")?.remove("accName")?.remove("accEmail")?.remove("accAdmin")?.apply()
         account.value = null
+        friends.value = null
     }
 
     /** Prüft im Hintergrund, ob die Anmeldung noch gültig ist (z. B. nach Passwort-Reset auf einem anderen Gerät). */
@@ -286,7 +289,8 @@ object GameRepository {
         if (st.game.status != "running" || st.self.caught || st.pickups.isEmpty()) return
         if (st.frozen(System.currentTimeMillis() + clockOffset)) return
         val reach = st.settings.pickupCollectM + minOf(fix.acc, 25.0)
-        val pu = st.pickups.firstOrNull { haversine(fix.lat, fix.lng, it.lat, it.lng) <= reach } ?: return
+        val serverNow = System.currentTimeMillis() + clockOffset
+        val pu = st.pickups.firstOrNull { it.landed(serverNow) && haversine(fix.lat, fix.lng, it.lat, it.lng) <= reach } ?: return
         val now = System.currentTimeMillis()
         if (now - (collectTried[pu.id] ?: 0L) < 20_000) return
         collectTried[pu.id] = now

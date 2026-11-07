@@ -114,6 +114,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
     val fix by GameRepository.myFix.collectAsState()
     val c = cat ?: Catalog(emptyMap(), emptyMap())
     var confirm by remember { mutableStateOf<AbilityDef?>(null) }
+    var inviting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     val running = st.game.status == "running"
 
@@ -133,7 +134,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
             try {
                 val k = GameRepository.collect(pu.id)
                 val a = c.ability(k)
-                Toast.makeText(ctx, "🎁 Eingesammelt: ${a.icon} ${a.name}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, if (pu.drop) "📦 Abwurf geschnappt! Schau in deine Fähigkeiten." else "🎁 Eingesammelt: ${a.icon} ${a.name}", Toast.LENGTH_LONG).show()
             } catch (e: ApiException) { Toast.makeText(ctx, e.message ?: "Fehler", Toast.LENGTH_LONG).show() }
         }
     }
@@ -270,7 +271,12 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(pu.name, fontWeight = FontWeight.Bold)
+                            Text((if (pu.drop) "📦 " else "") + pu.name, fontWeight = FontWeight.Bold)
+                            if (pu.drop) Text(
+                                if (pu.landed(serverNow)) "Versorgungsabwurf mit ${st.settings.supplyDropAbilities} Fähigkeiten!"
+                                else "Versorgungsabwurf – landet in ${fmtDur((pu.activeAt ?: serverNow) - serverNow)}",
+                                style = MaterialTheme.typography.bodySmall, color = C_GOLD,
+                            )
                             Text(
                                 (d?.let { m -> "${distTextRounded(m)} " + compassLong(bearing(fix!!.lat, fix!!.lng, pu.lat, pu.lng)) } ?: "Entfernung unbekannt") +
                                     " · noch ${fmtDur(pu.until - serverNow)}",
@@ -278,7 +284,7 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
                             )
                         }
                         TextButton(onClick = { showOnMap(pu.lat, pu.lng) }) { Text("Karte") }
-                        if (d != null && d <= st.settings.pickupCollectM + 25) Button(onClick = { collect(pu) }) { Text("Holen") }
+                        if (d != null && d <= st.settings.pickupCollectM + 25 && pu.landed(serverNow)) Button(onClick = { collect(pu) }) { Text("Holen") }
                     }
                 }
             }
@@ -287,12 +293,14 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
             Card(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Deine Punkte in diesem Spiel: ${st.self.points}", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    OutlinedButton(onClick = openLeaderboard) { Text("🏆 Bestenliste") }
+                    OutlinedButton(onClick = openLeaderboard) { Text("🏆") }
+                    if (st.game.status != "ended") OutlinedButton(onClick = { inviting = true }, modifier = Modifier.padding(start = 6.dp)) { Text("👥 Einladen") }
                 }
             }
         }
     }
 
+    if (inviting) InviteFriendsDialog(st.game.code) { inviting = false }
     confirm?.let { a ->
         if (a.target == "caughtRunner") {
             val caught = st.players.filter { it.role == "runner" && it.caught }

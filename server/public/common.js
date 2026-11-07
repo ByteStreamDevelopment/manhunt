@@ -67,5 +67,48 @@ window.MH = (() => {
     setTimeout(() => t.remove(), ms);
   }
 
-  return { $, h, api, dur, ago, clock, toast, account };
+  /* ---------------- Web-App (PWA) und Push ---------------- */
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+  /** Push für den angemeldeten Account einschalten. Gibt eine Meldung zurück. */
+  async function enablePush() {
+    const acc = account.token();
+    if (!acc) return 'Bitte zuerst anmelden.';
+    if (isIos && !standalone) return 'Auf dem iPhone gehen Benachrichtigungen nur in der installierten Web-App: Teilen → „Zum Home-Bildschirm“, dann Manhunt vom Home-Bildschirm öffnen.';
+    if (!pushSupported) return 'Dieser Browser unterstützt keine Benachrichtigungen.';
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return 'Benachrichtigungen wurden nicht erlaubt.';
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await api('/api/push/key');
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),
+    });
+    await api('/api/push/subscribe', { method: 'POST', acc, body: { subscription: sub.toJSON() } });
+    localStorage.setItem('manhunt:push', '1');
+    return null;
+  }
+  const pushEnabled = () => pushSupported && Notification.permission === 'granted' && localStorage.getItem('manhunt:push') === '1';
+
+  /** Karte „Benachrichtigungen“ bzw. „Zum Home-Bildschirm“ (nur wenn sinnvoll). */
+  function pushCard() {
+    if (!account.token() || pushEnabled()) return null;
+    const msg = h('p', { class: 'small' });
+    const iosHint = isIos && !standalone;
+    return h('div', { class: 'card gold stack' },
+      h('h3', {}, iosHint ? '📲 Als App installieren' : '🔔 Benachrichtigungen'),
+      h('p', {}, iosHint
+        ? 'Tippe unten auf „Teilen“ und dann „Zum Home-Bildschirm“. Danach Manhunt vom Home-Bildschirm öffnen – dann bekommst du Benachrichtigungen (ab iOS 16.4).'
+        : 'Bekomme Einladungen, Durchsagen, Chat und Spielereignisse auch, wenn die Seite zu ist.'),
+      !iosHint && h('button', { class: 'btn', onclick: async (e) => {
+        e.target.disabled = true;
+        try { const m = await enablePush(); msg.textContent = m || 'Benachrichtigungen sind an ✅'; } catch (x) { msg.textContent = x.message; }
+        e.target.disabled = false;
+      } }, 'Benachrichtigungen einschalten'),
+      msg);
+  }
+
+  return { $, h, api, dur, ago, clock, toast, account, enablePush, pushCard, isIos, standalone };
 })();

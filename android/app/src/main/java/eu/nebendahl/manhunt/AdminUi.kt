@@ -97,7 +97,17 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
         }
     }
 
+    // "new" = neues Spiel, sonst Code des Spiels, dessen Einstellungen bearbeitet werden
+    var edit by rememberSaveable { mutableStateOf<String?>(null) }
     open?.let { code -> AdminGameScreen(account, code) { open = null; reload++ }; return }
+    edit?.let { e ->
+        val g = games?.firstOrNull { it.code == e }
+        GameSettingsScreen(account, if (e == "new") null else e, g?.name ?: "Manhunt", g?.settingsJson) { created ->
+            edit = null; reload++
+            if (e == "new" && created != null) open = created
+        }
+        return
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("👑 Spielleitung") }, navigationIcon = { TextButton(onClick = onBack) { Text("‹ Zurück") } }) }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
@@ -105,12 +115,7 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                 error != null -> Text(error!!, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
                 games == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 else -> LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item {
-                        Text(
-                            "Neue Spiele legst du mit allen Einstellungen im Browser unter /admin an.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    item { Button(onClick = { edit = "new" }, modifier = Modifier.fillMaxWidth()) { Text("➕ Neues Spiel anlegen") } }
                     if (games!!.isEmpty()) item { Text("Noch keine Spiele.") }
                     items(games!!, key = { it.code }) { g ->
                         Card(Modifier.fillMaxWidth()) {
@@ -136,7 +141,8 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                     }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(onClick = { announce = g }) { Text("📣 Durchsage") }
+                                    OutlinedButton(onClick = { announce = g }) { Text("📣") }
+                                    OutlinedButton(onClick = { edit = g.code }) { Text("⚙️ Einstellungen") }
                                     OutlinedButton(onClick = {
                                         val link = BuildConfig.BASE_URL + "/g/" + g.code
                                         ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Einladung", link))

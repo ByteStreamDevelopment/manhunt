@@ -45,6 +45,10 @@
       { k: 'pickupLifetimeMin', t: 'num', label: 'Liegt so lange (Minuten)' },
       { k: 'pickupSearchM', t: 'num', label: 'Suchradius um die Spielmitte (Meter)' },
       { k: 'pickupRandomFallback', t: 'bool', label: 'Gibt es keine großen Orte, zufällige Punkte verwenden' },
+      { k: 'supplyDropsEnabled', t: 'bool', label: '📦 Versorgungsabwürfe: angekündigt, mit mehreren Fähigkeiten – lockt beide Teams an einen Ort' },
+      { k: 'supplyDropIntervalMin', t: 'num', label: 'Abwurf alle (Minuten)' },
+      { k: 'supplyDropWarnMin', t: 'num', label: 'Ankündigung vorher (Minuten)' },
+      { k: 'supplyDropAbilities', t: 'num', label: 'Fähigkeiten pro Abwurf' },
     ] },
     { group: 'Spielende', items: [
       { k: 'caughtEnabled', t: 'bool', label: '„Gefangen“-Funktion (Hunter markieren Runner als gefangen)' },

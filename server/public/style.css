@@ -242,3 +242,19 @@ table.board th button { all: unset; cursor: pointer; text-decoration: underline;
 .btn.rec { background: var(--hunter); }
 .replay { display: grid; gap: .4rem; }
 .replay input[type=range] { width: 100%; accent-color: var(--ink); }
+
+/* Profil */
+.statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem; }
+.statgrid > div { background: #fff; border: 2px solid var(--ink); padding: .4rem; text-align: center; }
+.statgrid b { display: block; font-family: var(--mono); font-size: 1.2rem; }
+.statgrid span { font-size: .75rem; color: var(--muted); }
+.badgegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .5rem; }
+.badgegrid > div { border: 2px solid var(--ink); background: #fff; padding: .5rem; display: grid; gap: .1rem; }
+.badgegrid .bi { font-size: 1.8rem; }
+.badgegrid .missing { opacity: .35; filter: grayscale(1); }
+a.name { text-decoration: none; font-weight: 800; }
+@media (max-width: 480px) { .statgrid { grid-template-columns: repeat(2, 1fr); } }
+
+.pickup-pin.drop { font-size: 32px; animation: dropPulse 1.2s infinite alternate; }
+@keyframes dropPulse { from { transform: scale(1); } to { transform: scale(1.18); } }
+@media (prefers-reduced-motion: reduce) { .pickup-pin.drop { animation: none; } }

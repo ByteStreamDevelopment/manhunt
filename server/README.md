@@ -29,6 +29,15 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.2
+
+* **Profile** (`/profile?u=NAME`, in der App über „Profil & Freunde“ oder die Bestenliste): Statistik, alle Abzeichen, Platzierungen pro Saison und die letzten 30 Spiele.
+* **Saisons:** Jeden Kalendermonat beginnt eine neue Bestenliste. Die ewige Bestenliste bleibt; ältere Saisons lassen sich auswählen.
+* **Freunde und Einladungen:** Freunde über den Benutzernamen hinzufügen, sehen wer online ist und Freunde direkt in ein Spiel einladen (Benachrichtigung auf Handy bzw. per Push).
+* **Versorgungsabwürfe (optional, pro Spiel):** Alle X Minuten wird ein Abwurf mit mehreren Fähigkeiten angekündigt (bevorzugt auf Märkten/Bahnhöfen) und landet nach der Vorwarnzeit – wer zuerst da ist, bekommt ihn.
+* **Spielleitung in der App:** Spiele mit allen Einstellungen (inkl. Fähigkeiten- und Quest-Tabellen) anlegen und bearbeiten.
+* **Web-App fürs iPhone:** Die Website lässt sich installieren (Teilen → „Zum Home-Bildschirm“) und bekommt **Push-Benachrichtigungen** (iOS ab 16.4, Android-Chrome, Desktop): Einladungen, Durchsagen, Team-Chat, Quests, Spielstart/-ende. Umgesetzt mit Web Push (VAPID, ohne Fremddienst-Konto); die Schlüssel erzeugt der Server beim ersten Start selbst. Optional `PUBLIC_URL`/`VAPID_SUBJECT` setzen.
+
 ## Neu in 2.1
 
 * **Seitenwechsel:** Gefangene Runner spielen automatisch als Hunter weiter (abschaltbar). „Befreiung“ oder „Wieder frei“ macht sie wieder zu Runnern.
@@ -110,6 +119,7 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `VPN_CHECK` | `ipapi` = IP-Adressen auf VPN/Proxy prüfen | `off` |
 | `OVERPASS_URL` | Overpass-Server für große Orte (Pickups, Quests) | `https://overpass-api.de/api/interpreter` |
 | `ANDROID_CERT_SHA256` | Fingerabdruck der App für App-Links | – |
+| `PUBLIC_URL` | Öffentliche Adresse (für Push-Absenderkennung) | `https://manhunt.nebendahl.eu` |
 | `RETENTION_DAYS` | Standortdaten beendeter Spiele nach so vielen Tagen löschen (0 = nie) | 30 |
 | `TRUST_PROXY` | `private`: X-Forwarded-For nur von Proxys im eigenen Netz, `always`, `never` | `private` |
 
@@ -129,6 +139,8 @@ lib/smtp.js        Mini-SMTP-Client für Bestätigungs-Mails
 lib/geo.js         Entfernungen, große Orte über Overpass
 lib/anticheat.js   VPN- und GPS-Fälschungs-Erkennung
 lib/store.js       SQLite-Speicher (Spiele, Accounts, Standorte)
+lib/social.js      Profile, Saisons, Freunde, Einladungen, Push-Abos
+lib/webpush.js     Web Push (VAPID + Verschlüsselung nach RFC 8291), ohne Abhängigkeiten
 test/features.mjs  Schneller Test (Neustart, Chat, Zuschauer, Abklingzeiten, Seitenwechsel …)
 test/e2e.mjs       End-to-End-Test inkl. Quests/Pickups/Live-Strafe (npm test, ca. 2 Minuten)
 public/            Startseite, Spielseite, Admin-Bereich, Bestenliste, Galerie

@@ -10,6 +10,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { ABILITIES, QUESTS, POINTS, BADGES, catalogForClients } = require('./lib/catalog');
 const { Store } = require('./lib/store');
+const { createSocial } = require('./lib/social');
 const { haversine, offset, randomPointAround, fetchPois } = require('./lib/geo');
 const { detectVpn, checkSpoof } = require('./lib/anticheat');
 const smtp = require('./lib/smtp');
@@ -97,6 +98,10 @@ const DEFAULTS = {
   pickupLifetimeMin: 30,         // so lange bleibt eine liegen
   pickupSearchM: 3000,           // Suchradius für große Orte um die Spielmitte
   pickupRandomFallback: true,    // ohne große Orte zufällige Punkte verwenden
+  supplyDropsEnabled: false,     // Versorgungsabwürfe (angekündigt, mit mehreren Fähigkeiten)
+  supplyDropIntervalMin: 15,     // alle X Minuten ein Abwurf
+  supplyDropWarnMin: 5,          // so lange vorher wird er angekündigt
+  supplyDropAbilities: 2,        // so viele Fähigkeiten enthält er
   antiVpn: 'warn',               // off | warn | block
   antiSpoof: 'warn',             // off | warn | block
   maxSpeedKmh: 45,               // schneller = verdächtig
@@ -110,6 +115,7 @@ const LIMITS = {
   questIntervalMin: [1, 120], questMaxActive: [1, 5], pickupIntervalMin: [1, 120], pickupMax: [0, 50],
   pickupSpacingM: [1000, 20000], pickupCollectM: [15, 200], pickupLifetimeMin: [2, 600], pickupSearchM: [300, 10000],
   maxSpeedKmh: [10, 500], freezeImmunitySec: [0, 1800], spectatorDelaySec: [0, 1800],
+  supplyDropIntervalMin: [1, 240], supplyDropWarnMin: [0, 60], supplyDropAbilities: [1, 5],
 };
 const ENUMS = { livePenaltyUntil: ['nextRound', 'upload'], antiVpn: ['off', 'warn', 'block'], antiSpoof: ['off', 'warn', 'block'] };
 const toBool = (v) => v === true || v === 'true';
@@ -173,7 +179,7 @@ db.accounts ||= {}; db.gallery ||= [];
 for (const g of Object.values(db.games)) {
   g.settings = sanitizeSettings(g.settings, g.settings || DEFAULTS);
   g.effects ||= []; g.pickups ||= []; g.photos ||= []; g.messages ||= []; g.locations ||= []; g.chat ||= [];
-  for (const p of Object.values(g.players)) migratePlayer(p);
+  for (const p of Object.values(g.players)) { migratePlayer(p); p.gameCode = g.code; }
   indexLocations(g);
 }
 function migratePlayer(p) {
@@ -455,6 +461,7 @@ function award(pl, field, points = 0, amount = 1) {
     a.stats = { ...emptyStats(), ...(a.stats || {}) };
     a.stats.points += points;
     if (field) a.stats[field] = (a.stats[field] || 0) + amount;
+    social.seasonAward(a, field, points, amount);
     checkBadges(a, pl);
   }
 }
@@ -488,11 +495,21 @@ function getGame(code) {
 }
 function pushMsg(g, text, kind = 'system') {
   g.messages.push({ id: rid(3), ts: Date.now(), text: cleanText(text, 300), kind });
+  // Wichtige Meldungen auch als Push an alle Spieler (Browser/iPhone-Web-App)
+  if (kind === 'admin' || /^(Das Spiel läuft|Spiel beendet|📦)/.test(text)) {
+    for (const p of Object.values(g.players)) {
+      if (p.accountId) social.notifyAccount(p.accountId, { title: kind === 'admin' ? '📣 Spielleitung' : g.name, body: cleanText(text, 200), url: `/g/${g.code}`, tag: 'game', urgent: true });
+    }
+  }
   if (g.messages.length > 150) g.messages.splice(0, g.messages.length - 150);
 }
 /** Private Meldung nur für einen Spieler (App zeigt sie als Benachrichtigung). */
 function inbox(pl, text, kind = 'info') {
   pl.inbox.push({ id: rid(3), ts: Date.now(), text: cleanText(text, 200), kind });
+  if (pl.accountId) {
+    const title = { quest: 'Neue Quest', reward: 'Belohnung', bad: 'Achtung!', good: 'Gute Nachricht' }[kind] || 'Manhunt';
+    social.notifyAccount(pl.accountId, { title, body: cleanText(text, 200), url: pl.gameCode ? `/g/${pl.gameCode}` : '/', tag: 'inbox-' + kind, urgent: kind === 'bad' });
+  }
   if (pl.inbox.length > 25) pl.inbox.splice(0, pl.inbox.length - 25);
 }
 const runnersOf = (g) => Object.values(g.players).filter((p) => p.role === 'runner');
@@ -542,6 +559,7 @@ function endGame(g, reason, winner = null) {
   const now = Date.now();
   g.status = 'ended'; g.endedAt = now;
   pushMsg(g, `Spiel beendet: ${reason}`);
+  g.winner = winner;
   for (const p of Object.values(g.players)) {
     p.penalty = null;
     if (!isPlaying(p)) continue; // Zuschauer
@@ -557,6 +575,7 @@ function endGame(g, reason, winner = null) {
       if (!p.wasLive) award(p, 'cleanEscapes', 0);
     }
   }
+  social.recordGame(g, winner);
 }
 function resetGame(g) {
   g.status = 'lobby'; g.startedAt = null; g.endedAt = null;
@@ -565,7 +584,7 @@ function resetGame(g) {
   for (const p of Object.values(g.players)) {
     // Übergelaufene werden wieder Runner
     if (p.converted) p.role = 'runner';
-    Object.assign(p, { caught: false, caughtAt: null, caughtBy: null, converted: false, wasLive: false, lastLoc: null, abilities: {}, cooldowns: {}, quests: [], inbox: [], penalty: null, photoOrder: null, points: 0, gotStart: false, jokers: [], flags: {} });
+    Object.assign(p, { gameCatches: 0, caught: false, caughtAt: null, caughtBy: null, converted: false, wasLive: false, lastLoc: null, abilities: {}, cooldowns: {}, quests: [], inbox: [], penalty: null, photoOrder: null, points: 0, gotStart: false, jokers: [], flags: {} });
   }
 }
 const chatLast = new Map();
@@ -580,6 +599,11 @@ function pushChat(g, pl, msg) {
     for (const c of g.chat.splice(0, g.chat.length - 300)) if (c.voice) fs.unlink(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`), () => {});
   }
   award(pl, 'chats', 0);
+  for (const p of Object.values(g.players)) {
+    if (p.id !== pl.id && p.role === pl.role && p.accountId) {
+      social.notifyAccount(p.accountId, { title: `💬 ${pl.name}`, body: msg.voice ? '🎙️ Sprachnachricht' : cleanText(msg.text, 120), url: `/g/${g.code}`, tag: 'chat' });
+    }
+  }
 }
 function deleteVoiceFiles(code) {
   try { for (const f of fs.readdirSync(VOICE_DIR)) if (f.startsWith(code + '_')) fs.unlinkSync(path.join(VOICE_DIR, f)); } catch { /* egal */ }
@@ -604,6 +628,7 @@ function setCaught(g, target, value, by) {
     award(target, 'caught', 0);
     if (by && by.role === 'hunter') {
       target.caughtBy = by.id;
+      by.gameCatches = (by.gameCatches || 0) + 1;
       award(by, 'catches', POINTS.catch);
       if (by.converted) award(by, 'revenge', 0);
       completeQuestsOfKind(g, by, 'catch');
@@ -991,7 +1016,7 @@ function spawnPickup(g, now) {
   const c = gameCenter(g);
   if (!c) return false;
   const active = g.pickups.filter((p) => !p.takenBy && p.until > now);
-  if (active.length >= s.pickupMax) return false;
+  if (active.filter((p) => !p.drop).length >= s.pickupMax) return false;
   const spacing = Math.max(1000, s.pickupSpacingM);
   const free = (lat, lng) => active.every((p) => haversine(p.lat, p.lng, lat, lng) >= spacing);
   const inArea = (lat, lng) => haversine(lat, lng, c.lat, c.lng) <= c.r && pointInZone(g, lat, lng);
@@ -1009,12 +1034,56 @@ function spawnPickup(g, now) {
   if (g.pickups.length > 100) g.pickups.splice(0, g.pickups.length - 100);
   return true;
 }
+/* ---------------- Versorgungsabwürfe (optional) ---------------- */
+function updateDrops(g, now) {
+  const s = g.settings;
+  let changed = false;
+  if (!g.nextDropAt) g.nextDropAt = (g.startedAt || now) + s.supplyDropIntervalMin * 60000;
+  if (now >= g.nextDropAt) {
+    g.nextDropAt = now + s.supplyDropIntervalMin * 60000;
+    ensurePois(g).then(() => { if (g.status === 'running' && spawnDrop(g, Date.now())) { save(); notify(g.code); } }).catch(() => {});
+  }
+  for (const pu of g.pickups) {
+    if (pu.drop && !pu.landed && !pu.takenBy && pu.activeAt <= now) {
+      pu.landed = true; changed = true;
+      pushMsg(g, `📦 Der Versorgungsabwurf bei „${pu.name}“ ist gelandet – wer zuerst da ist, bekommt ${s.supplyDropAbilities} Fähigkeiten!`);
+    }
+  }
+  return changed;
+}
+function spawnDrop(g, now) {
+  const s = g.settings;
+  const c = gameCenter(g);
+  if (!c) return false;
+  const active = g.pickups.filter((p) => !p.takenBy && p.until > now);
+  const free = (lat, lng) => active.every((p) => haversine(p.lat, p.lng, lat, lng) >= Math.max(1000, s.pickupSpacingM));
+  const inArea = (lat, lng) => haversine(lat, lng, c.lat, c.lng) <= c.r && pointInZone(g, lat, lng);
+  // Bevorzugt offene Plätze wie Märkte und Bahnhöfe – da treffen sich beide Teams
+  const pois = ((g.pois && g.pois.list) || []).filter((p) => inArea(p.lat, p.lng));
+  const good = pois.filter((p) => free(p.lat, p.lng));
+  const pref = good.filter((p) => ['Markt', 'Bahnhof', 'Busbahnhof', 'Stadion'].includes(p.kind));
+  let spot = null;
+  const src = pref.length ? pref : good.length ? good : [];
+  if (src.length) { const p = pick(src); spot = { lat: p.lat, lng: p.lng, name: p.name }; }
+  for (let i = 0; i < 40 && !spot; i++) {
+    const [la, ln] = randomPointAround(c.lat, c.lng, 0, c.r * 0.8);
+    if (inArea(la, ln) && free(la, ln)) spot = { lat: la, lng: ln, name: 'Abwurfzone' };
+  }
+  if (!spot) { const [la, ln] = randomPointAround(c.lat, c.lng, 0, c.r * 0.5); spot = { lat: la, lng: ln, name: 'Abwurfzone' }; }
+  const activeAt = now + s.supplyDropWarnMin * 60000;
+  g.pickups.push({ id: rid(4), ...spot, kind: 'Abwurf', drop: true, landed: s.supplyDropWarnMin === 0, at: now, activeAt, until: activeAt + Math.max(15, s.pickupLifetimeMin) * 60000, takenBy: null });
+  pushMsg(g, s.supplyDropWarnMin > 0
+    ? `📦 Versorgungsabwurf in ${s.supplyDropWarnMin} Minuten bei „${spot.name}“ – mit ${s.supplyDropAbilities} Fähigkeiten!`
+    : `📦 Versorgungsabwurf bei „${spot.name}“ – mit ${s.supplyDropAbilities} Fähigkeiten!`);
+  return true;
+}
 function updatePickups(g, now) {
   const s = g.settings;
   let changed = false;
   const before = g.pickups.length;
   g.pickups = g.pickups.filter((p) => (p.takenBy ? now - p.takenAt < 60000 : p.until > now));
   if (g.pickups.length !== before) changed = true;
+  if (s.supplyDropsEnabled && s.abilitiesEnabled && updateDrops(g, now)) changed = true;
   if (!s.pickupsEnabled || !s.abilitiesEnabled || s.pickupMax === 0) return changed;
   if (now >= (g.nextPickupAt || 0)) {
     g.nextPickupAt = now + s.pickupIntervalMin * 60000;
@@ -1196,7 +1265,9 @@ function buildState(g, auth) {
     messages: g.messages.filter((m) => isAdmin || m.kind !== 'cheat').slice(-40),
     effects,
     chat,
-    pickups: g.status === 'running' ? g.pickups.filter((p) => !p.takenBy && p.until > now).map(({ id, lat, lng, name, kind, until }) => ({ id, lat, lng, name, kind, until })) : [],
+    pickups: g.status === 'running' ? g.pickups.filter((p) => !p.takenBy && p.until > now).map(({ id, lat, lng, name, kind, until, drop, activeAt }) => ({
+      id, lat, lng, name, kind, until, drop: !!drop, activeAt: activeAt || null,
+    })) : [],
   };
 }
 const roleText = (r) => (r === 'spectator' ? 'schaut jetzt zu' : `spielt jetzt als ${r === 'runner' ? 'Runner' : 'Hunter'}`);
@@ -1235,19 +1306,32 @@ async function vpnGate(req, g, pl) {
 /* ------------------------------------------------------------------ */
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
+const social = createSocial({
+  getDb: () => db, save, HttpError, readJSON, sendJSON, accountFromToken, findAccount, isAdminAccount, rateLimit,
+});
+
 async function handleApi(req, res, url) {
   const m = req.method, p = url.pathname;
   if (m === 'GET' && p === '/api/health') return sendJSON(res, 200, { ok: true });
   if (m === 'GET' && p === '/api/catalog') return sendJSON(res, 200, catalogForClients());
   if (p.startsWith('/api/auth/')) return handleAuth(req, res, p);
+  if (p === '/api/seasons' || p.startsWith('/api/profile/') || p.startsWith('/api/friends') || p.startsWith('/api/push/')) return social.handle(req, res, url);
 
   if (m === 'GET' && p === '/api/leaderboard') {
     const sort = ['points', 'wins', 'catches', 'quests', 'surviveMin', 'pickups', 'featured'].includes(url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'points';
-    const rows = Object.values(db.accounts).filter((a) => a.verified)
-      .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats, badges: Object.keys(a.badges || {}) }))
-      .filter((r) => r.games > 0 || r.points > 0)
-      .sort((a, b) => b[sort] - a[sort] || b.points - a.points).slice(0, 100);
-    return sendJSON(res, 200, { sort, rows });
+    // season: leer/all = ewige Bestenliste, current = aktueller Monat, oder z. B. 2026-11
+    let season = url.searchParams.get('season') || 'all';
+    if (season === 'current') season = social.seasonKey();
+    let rows;
+    if (/^\d{4}-\d{2}$/.test(season)) rows = social.seasonRows(season);
+    else {
+      season = 'all';
+      rows = Object.values(db.accounts).filter((a) => a.verified)
+        .map((a) => ({ username: a.username, isAdmin: isAdminAccount(a), ...emptyStats(), ...a.stats, badges: Object.keys(a.badges || {}) }))
+        .filter((r) => r.games > 0 || r.points > 0);
+    }
+    rows = rows.sort((a, b) => (b[sort] || 0) - (a[sort] || 0) || b.points - a.points).slice(0, 100);
+    return sendJSON(res, 200, { sort, season, currentSeason: social.seasonKey(), rows });
   }
   if (m === 'GET' && p === '/api/gallery') {
     return sendJSON(res, 200, { items: [...db.gallery].sort((a, b) => b.featuredAt - a.featuredAt).map(({ id, username, gameName, ts, caption, featuredAt, quest }) => ({ id, username, gameName, ts, caption, featuredAt, quest })) });
@@ -1453,6 +1537,7 @@ async function handleGame(req, res, url, code, rest) {
         antiVpn: s.antiVpn, antiSpoof: s.antiSpoof,
         caughtBecomeHunter: s.caughtBecomeHunter, chatEnabled: s.chatEnabled, voiceEnabled: s.voiceEnabled,
         spectatorsEnabled: s.spectatorsEnabled, spectatorDelaySec: s.spectatorDelaySec,
+        supplyDropsEnabled: s.supplyDropsEnabled, supplyDropIntervalMin: s.supplyDropIntervalMin,
       },
     });
   }
@@ -1475,7 +1560,7 @@ async function handleGame(req, res, url, code, rest) {
     if (b.role !== 'spectator') await vpnGate(req, g, null);
     const name = acc.username;
     if (Object.values(g.players).some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Dieser Name ist schon im Spiel');
-    const player = migratePlayer({ id: rid(4), name, role: b.role, token: rid(18), accountId: acc.id, caught: false, joinedAt: Date.now(), lastSeen: Date.now(), lastLoc: null });
+    const player = migratePlayer({ id: rid(4), name, role: b.role, token: rid(18), accountId: acc.id, gameCode: g.code, caught: false, joinedAt: Date.now(), lastSeen: Date.now(), lastLoc: null });
     g.players[player.id] = player;
     if (g.status === 'running') { giveStartAbilities(g, player); player.nextQuestAt = Date.now() + 60000; }
     pushMsg(g, `${name} ${b.role === 'spectator' ? 'schaut zu' : `ist als ${b.role === 'runner' ? 'Runner' : 'Hunter'} beigetreten`}.`);
@@ -1658,14 +1743,18 @@ async function handleGame(req, res, url, code, rest) {
     const d = haversine(me.lat, me.lng, pu.lat, pu.lng);
     const reach = g.settings.pickupCollectM + Math.min(me.acc || 0, 25);
     if (d > reach) throw new HttpError(409, `Noch ${Math.round(d - reach)} m – komm näher heran!`);
-    const got = grantRandomAbility(g, pl, `eingesammelt bei ${pu.name}`);
+    if (pu.drop && pu.activeAt > Date.now()) throw new HttpError(409, `Der Abwurf landet erst in ${Math.ceil((pu.activeAt - Date.now()) / 1000)} s`);
+    const n = pu.drop ? g.settings.supplyDropAbilities : 1;
+    const gotAll = [];
+    for (let i = 0; i < n; i++) { const k = grantRandomAbility(g, pl, pu.drop ? `Versorgungsabwurf bei ${pu.name}` : `eingesammelt bei ${pu.name}`); if (k) gotAll.push(k); }
+    const got = gotAll[0];
     if (!got) throw new HttpError(409, 'Für dein Team gibt es keine Fähigkeiten zum Einsammeln');
     pu.takenBy = pl.id; pu.takenAt = Date.now();
-    award(pl, 'pickups', POINTS.pickup);
+    award(pl, 'pickups', POINTS.pickup * (pu.drop ? 3 : 1));
     completeQuestsOfKind(g, pl, 'pickup');
-    pushMsg(g, `🎁 ${pl.name} hat eine Fähigkeit bei „${pu.name}“ eingesammelt.`);
+    pushMsg(g, pu.drop ? `📦 ${pl.name} hat den Versorgungsabwurf bei „${pu.name}“ geschnappt!` : `🎁 ${pl.name} hat eine Fähigkeit bei „${pu.name}“ eingesammelt.`);
     save(); notify(g.code);
-    return sendJSON(res, 200, { ok: true, ability: got });
+    return sendJSON(res, 200, { ok: true, ability: got, abilities: gotAll });
   }
 
   throw new HttpError(404, 'Nicht gefunden');
@@ -1707,6 +1796,7 @@ async function serveStatic(req, res, url) {
   else if (p === '/admin') p = '/admin.html';
   else if (p === '/gallery' || p === '/galerie') p = '/gallery.html';
   else if (p === '/leaderboard' || p === '/bestenliste') p = '/leaderboard.html';
+  else if (p === '/profile' || p === '/profil') p = '/profile.html';
   else if (/^\/g\/[A-Za-z0-9]+\/?$/.test(p)) p = '/game.html';
   const file = path.normalize(path.join(PUBLIC_DIR, p));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) throw new HttpError(403, 'Verboten');

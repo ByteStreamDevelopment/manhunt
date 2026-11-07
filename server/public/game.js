@@ -244,7 +244,7 @@
     for (const l of layers.extras) l.remove();
     layers.extras = [];
     for (const pu of S.pickups || []) {
-      const icon = L.divIcon({ className: '', html: '<div class="pickup-pin">🎁</div>', iconSize: [26, 26], iconAnchor: [13, 13] });
+      const icon = L.divIcon({ className: '', html: `<div class="pickup-pin${pu.drop ? ' drop' : ''}">${pu.drop ? '📦' : '🎁'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
       const mk = L.marker([pu.lat, pu.lng], { icon }).addTo(map).bindPopup(() => pickupPopup(pu));
       layers.extras.push(mk, L.circle([pu.lat, pu.lng], { radius: S.settings.pickupCollectM, color: '#f2bc0f', weight: 2, fillOpacity: 0.1 }).addTo(map));
     }
@@ -259,7 +259,9 @@
   }
   function pickupPopup(pu) {
     const d = lastFix ? haversine(lastFix.lat, lastFix.lng, pu.lat, pu.lng) : null;
-    return h('div', {}, h('strong', {}, `🎁 ${pu.name}`), h('div', {}, 'Hier liegt eine Fähigkeit.'),
+    const waiting = pu.drop && pu.activeAt && pu.activeAt > nowMs();
+    return h('div', {}, h('strong', {}, `${pu.drop ? '📦' : '🎁'} ${pu.name}`),
+      h('div', {}, pu.drop ? (waiting ? `Versorgungsabwurf – landet in ${dur(pu.activeAt - nowMs())}` : `Versorgungsabwurf mit ${S.settings.supplyDropAbilities} Fähigkeiten!`) : 'Hier liegt eine Fähigkeit.'),
       d != null ? h('div', {}, `Entfernung: ${fmtDist(d)}`) : null,
       h('button', { class: 'btn small', onclick: () => collect(pu) }, 'Einsammeln'));
   }
@@ -412,6 +414,8 @@
     if (isPlayer() && g.status !== 'ended') kids.push(trackingCard());
     if (me().converted && g.status === 'running') kids.push(card('gold', h('h3', {}, '🔄 Seitenwechsel'), h('p', {}, 'Du wurdest gefangen und jagst jetzt als Hunter mit.')));
     if (g.status === 'ended') kids.push(replayCard());
+    if (isPlayer() && g.status !== 'ended') kids.push(inviteCard());
+    kids.push(MH.pushCard());
     if (r === 'runner' && s.photosEnabled && g.status !== 'ended') kids.push(photoCard());
     if (r === 'hunter' && s.photosEnabled && g.status === 'running') kids.push(hunterPhotoCard());
     if (r === 'hunter' && s.showDistance && g.status === 'running') kids.push(distanceCard());
@@ -463,7 +467,8 @@
     // Pickups
     const pus = (S.pickups || []).map((pu) => ({ pu, d: lastFix ? haversine(lastFix.lat, lastFix.lng, pu.lat, pu.lng) : null })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9));
     if (pus.length) kids.push(card('', h('h3', {}, '🎁 Fähigkeiten zum Einsammeln'), h('ul', { class: 'plist' }, pus.slice(0, 8).map(({ pu, d }) => h('li', {},
-      h('div', { class: 'grow' }, h('div', { class: 'name' }, pu.name), h('div', { class: 'small muted' }, d != null ? fmtDist(d) : 'Entfernung unbekannt')),
+      h('div', { class: 'grow' }, h('div', { class: 'name' }, `${pu.drop ? '📦 ' : ''}${pu.name}`), h('div', { class: 'small muted' }, d != null ? fmtDist(d) : 'Entfernung unbekannt',
+        pu.drop && pu.activeAt > nowMs() ? h('span', {}, ' · landet in ', clk('until', pu.activeAt)) : null)),
       h('button', { class: 'btn small light', onclick: () => map.setView([pu.lat, pu.lng], 17) }, 'Karte'),
       h('button', { class: 'btn small', onclick: () => collect(pu) }, 'Einsammeln'))))));
     kids.push(card('', h('p', {}, `Deine Punkte in diesem Spiel: `, h('b', {}, String(sf.points || 0))), h('a', { class: 'btn small light', href: '/leaderboard' }, '🏆 Bestenliste')));
@@ -535,6 +540,26 @@
       h('h3', {}, `💬 Team-Chat (${team})`),
       items.length ? h('ul', { class: 'chat' }, items) : h('p', { class: 'muted' }, 'Noch keine Nachrichten. Nur dein Team kann mitlesen.'),
       canWrite ? h('div', { class: 'chatbar' }, input, h('button', { class: 'btn', onclick: send }, 'Senden'), S.settings.voiceEnabled ? rec : null) : null));
+  }
+
+  /* ---------------- Freunde einladen ---------------- */
+  let friendsCache = null, friendsAt = 0;
+  function inviteCard() {
+    const acc = account.get();
+    if (!acc) return null;
+    const box = h('div', { class: 'card stack' }, h('h3', {}, '👥 Freunde einladen'));
+    const fill = (f) => {
+      const list = f.friends;
+      box.append(list.length ? h('ul', { class: 'plist' }, list.map((x) => h('li', {},
+        h('span', {}, x.online ? '🟢' : '⚪'), h('span', { class: 'grow name' }, x.username),
+        h('button', { class: 'btn small light', onclick: async (e) => {
+          try { await api('/api/friends/invite', { method: 'POST', acc: acc.token, body: { username: x.username, code: CODE } }); e.target.textContent = '✔ Eingeladen'; e.target.disabled = true; }
+          catch (x2) { toast(x2.message); }
+        } }, 'Einladen')))) : h('p', { class: 'small muted' }, 'Noch keine Freunde – füge welche in deinem ', h('a', { href: '/profile' }, 'Profil'), ' hinzu.'));
+    };
+    if (friendsCache && Date.now() - friendsAt < 60000) fill(friendsCache);
+    else api('/api/friends', { acc: acc.token }).then((f) => { friendsCache = f; friendsAt = Date.now(); fill(f); }).catch(() => box.remove());
+    return box;
   }
 
   /* ---------------- Wiederholung nach Spielende ---------------- */
