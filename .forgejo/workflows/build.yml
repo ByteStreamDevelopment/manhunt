@@ -2,7 +2,6 @@ name: Build APK
 
 on:
   push:
-    branches: ['**']
     tags: ['v*']
   workflow_dispatch:
 
@@ -34,7 +33,7 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
-      # Fester Signierschlüssel (Issue #5): Ohne ihn signiert jeder Build mit einem neuen Zufallsschlüssel,
+      # Fester Signierschlüssel: Ohne ihn signiert jeder Build mit einem neuen Zufallsschlüssel,
       # und Android verweigert jedes Update ("App nicht installiert").
       # Secrets: MANHUNT_KEYSTORE_BASE64 = base64 -w0 android/keystore/manhunt.jks, MANHUNT_KEYSTORE_PASSWORD
       - name: Signierschlüssel bereitstellen
@@ -59,7 +58,9 @@ jobs:
           REF="${{ github.ref }}"
           if [ "${REF#refs/tags/v}" != "$REF" ]; then
             V="${REF#refs/tags/v}"
-            IFS=. read -r MA MI PA <<< "$V"
+            MA=$(echo "$V" | cut -d. -f1)
+            MI=$(echo "$V" | cut -d. -f2)
+            PA=$(echo "$V" | cut -d. -f3)
             CODE=$(( ${MA:-0} * 1000000 + ${MI:-0} * 10000 + ${PA:-0} ))
             echo "VERSION_NAME=$V" >> "$GITHUB_ENV"
             echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
@@ -86,6 +87,10 @@ jobs:
           TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          if [ -z "$TOKEN" ]; then
+            echo "Secret RELEASE_TOKEN fehlt (Forgejo-Token mit Schreibrecht auf Repository)"
+            exit 1
+          fi
           API="${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
           # Änderungen seit dem vorherigen Tag als Release-Notizen (zeigt die App im Update-Dialog)
           PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
