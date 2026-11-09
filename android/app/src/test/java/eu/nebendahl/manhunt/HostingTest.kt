@@ -21,7 +21,8 @@ class HostingTest {
         assertEquals(1044484L, g.bytes)
         assertFalse(l.storage.unlimited)
         assertEquals(0, l.storage.percent)
-        assertEquals("1,0 MB", fmtBytes(g.bytes))
+        assertEquals("1020 KB", fmtBytes(g.bytes))
+        assertEquals("1,5 MB", fmtBytes(1536L * 1024))
     }
 
     @Test fun adminIsUnlimitedAndOldServerStillParses() {
