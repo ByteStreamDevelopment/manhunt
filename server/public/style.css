@@ -121,7 +121,7 @@ input.code { font-family: var(--head); font-size: 2rem; letter-spacing: .3em; te
 .mapwrap { position: relative; }
 .mapbtns { position: absolute; right: .6rem; top: .6rem; z-index: 500; display: grid; gap: .4rem; }
 .dock { padding: .75rem; }
-.tabs { display: flex; gap: .4rem; margin-bottom: .75rem; }
+.tabs { display: flex; gap: .4rem; margin-bottom: .75rem; overflow-x: auto; }
 .tabs button {
   flex: 1; font: inherit; font-weight: 800; padding: .55rem .4rem; border: 3px solid var(--ink); background: var(--panel); color: var(--ink); cursor: pointer; min-height: 44px;
 }

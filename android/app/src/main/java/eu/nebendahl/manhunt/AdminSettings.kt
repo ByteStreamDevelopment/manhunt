@@ -65,6 +65,9 @@ private sealed class F(val key: String, val label: String, val hint: String? = n
 }
 
 private val GROUPS: List<Pair<String, List<F>>> = listOf(
+    "Sichtbarkeit" to listOf(
+        F.Bool("publicListed", "🌍 Unter „Offene Runden“ anzeigen", "Jeder mit Account kann die Runde finden und beitreten"),
+    ),
     "Standort" to listOf(
         F.Num("locationIntervalSec", "Standort-Intervall (Sekunden)"),
         F.Num("headStartMin", "Vorsprung für Runner (Minuten)", "0 = aus"),
@@ -161,7 +164,7 @@ internal fun unflatten(m: Map<String, Any>): JSONObject {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GameSettingsScreen(account: Account, code: String?, initialName: String, initialSettings: String?, onDone: (String?) -> Unit) {
+fun GameSettingsScreen(account: Account, code: String?, initialName: String, initialSettings: String?, initialPlace: GamePlace? = null, onDone: (String?) -> Unit) {
     BackHandler { onDone(null) }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -172,6 +175,10 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val open = remember { mutableStateMapOf<String, Boolean>() }
+    var place by remember { mutableStateOf(initialPlace) }
+    var placeChanged by remember { mutableStateOf(false) }
+    // Nach dem Laden einer Vorlage alle Eingabefelder neu aufbauen
+    var formVersion by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
         try {
@@ -199,7 +206,8 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
             try {
                 val json = unflatten(values)
                 val c = withContext(Dispatchers.IO) {
-                    if (code == null) Api.adminCreate(account.token, name, json) else { Api.adminUpdate(account.token, code, name, json); code }
+                    val pl = if (code == null || placeChanged) place.toJson() else null
+                    if (code == null) Api.adminCreate(account.token, name, json, pl) else { Api.adminUpdate(account.token, code, name, json, pl); code }
                 }
                 Toast.makeText(ctx, if (code == null) "Spiel $c angelegt" else "Gespeichert", Toast.LENGTH_SHORT).show()
                 onDone(c)
@@ -218,8 +226,9 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
             Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) { if (error != null) Text(error!!) else CircularProgressIndicator() }
             return@Scaffold
         }
-        LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.runtime.key(formVersion) { LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item { OutlinedTextField(name, { name = it.take(40) }, label = { Text("Name des Spiels") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+            item { TemplateBar(account, current = { unflatten(values) }, onLoad = { j -> values.clear(); values.putAll(flatten(j)); formVersion++ }) }
             error?.let { e -> item { Text(e, color = MaterialTheme.colorScheme.error) } }
             for ((group, fields) in GROUPS) {
                 item(key = "g_$group") {
@@ -232,6 +241,7 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
                             if (open[group] == true) {
                                 fields.forEach { f -> FieldRow(f, values) }
                                 if (group == "Spielzone") OutlinedButton(onClick = { useMyLocation() }) { Text("📍 Mein Standort als Mittelpunkt") }
+                                if (group == "Sichtbarkeit") PlaceEditor(place) { place = it; placeChanged = true }
                                 if (group == "Fähigkeiten") cat?.let { AbilityTable(it, values) }
                                 if (group == "Quests") { CustomQuestsEditor(values, cat); cat?.let { QuestTable(it, values) } }
                             }
@@ -240,7 +250,7 @@ fun GameSettingsScreen(account: Account, code: String?, initialName: String, ini
                 }
             }
             item { Button(onClick = { save() }, enabled = !busy && name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text(if (code == null) "Spiel anlegen" else "Speichern") } }
-        }
+        } }
     }
 }
 

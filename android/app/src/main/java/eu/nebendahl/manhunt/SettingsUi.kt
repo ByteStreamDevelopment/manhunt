@@ -87,7 +87,7 @@ fun SettingsScreen(onBack: () -> Unit, openProfile: () -> Unit) {
                                 }
                             }
                         }, enabled = !checking) { Text(if (checking) "Suche …" else "Jetzt nach Updates suchen") }
-                        TextButton(onClick = { open(ctx, "https://git.nebendahl.eu/Manhunt/manhunt/releases") }) { Text("Alle Versionen") }
+                        TextButton(onClick = { open(ctx, "https://git.nebendahl.eu/Mrcoolgamer-Inc/manhunt/releases") }) { Text("Alle Versionen") }
                     }
                     updateMsg?.let { Text(it) }
                     Toggle("Beim Öffnen automatisch prüfen", autoUpdate) { AppSettings.set(AppSettings.autoUpdateCheck, "autoUpdateCheck", it) }
@@ -166,7 +166,7 @@ fun SettingsScreen(onBack: () -> Unit, openProfile: () -> Unit) {
                     Text("Karten: © OpenStreetMap-Mitwirkende" + if (mapStyle == "topo") ", OpenTopoMap (CC-BY-SA)" else "", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { open(ctx, BuildConfig.BASE_URL) }) { Text("Website") }
-                        TextButton(onClick = { open(ctx, "https://git.nebendahl.eu/Manhunt/manhunt") }) { Text("Quellcode") }
+                        TextButton(onClick = { open(ctx, "https://git.nebendahl.eu/Mrcoolgamer-Inc/manhunt") }) { Text("Quellcode") }
                     }
                 }
             }

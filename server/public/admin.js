@@ -23,6 +23,10 @@
 
   /* Alle Einstellungen. Jedes Feature lässt sich hier an- oder ausschalten. */
   const FIELDS = [
+    { group: 'Sichtbarkeit', items: [
+      { k: 'publicListed', t: 'bool', label: '🌍 Unter „Offene Runden“ anzeigen', hint: 'Jeder mit Account kann die Runde dann finden und beitreten – nach Entfernung sortiert. Sonst nur mit Link oder Code.' },
+      { k: '_place', t: 'place' },
+    ] },
     { group: 'Standort', items: [
       { k: 'locationIntervalSec', t: 'num', label: 'Standort-Intervall (Sekunden)', hint: 'So oft wird der Standort normal geteilt. 60 = jede Minute.' },
       { k: 'headStartMin', t: 'num', label: 'Vorsprung für Runner (Minuten)', hint: 'Hunter sehen die Runner erst nach dieser Zeit. 0 = aus.' },
@@ -97,8 +101,9 @@
 
   const TEAM = { runner: 'Runner', hunter: 'Hunter', any: 'Beide' };
   let uid = 0;
-  function settingsForm(values) {
+  function settingsForm(values, place = null) {
     const inputs = {}; const nested = {};
+    let placeVal = place ? { ...place } : null;
     const root = h('div', { class: 'stack' });
     for (const g of FIELDS) {
       const box = h('details', { class: 'fields card' }, h('summary', {}, g.group));
@@ -195,6 +200,18 @@
           inner.append(h('div', { class: 'tablewrap' }, h('table', { class: 'cfg' },
             h('thead', {}, h('tr', {}, h('th', {}, 'Quest'), h('th', {}, 'Erlaubt'), h('th', {}, 'Zeit (min)'), h('th', {}, 'Punkte'), h('th', {}, 'Belohnung'))),
             h('tbody', {}, rows))));
+        } else if (f.t === 'place') {
+          // Ungefährer Ort der Runde (für „Offene Runden“, wird auf ~1 km gerundet). Mit Spielzone gilt deren Mittelpunkt.
+          const name = h('input', { type: 'text', maxlength: '60', placeholder: 'Ortsname, z. B. Stadtpark', value: placeVal?.name || '' });
+          const info = h('span', { class: 'small muted' });
+          const show = () => { info.textContent = placeVal ? `📍 ${placeVal.lat.toFixed(2)}, ${placeVal.lng.toFixed(2)}` : 'Kein Ort gesetzt'; };
+          show();
+          nested.place = () => (placeVal ? { ...placeVal, name: name.value } : null);
+          inner.append(h('div', { class: 'stack' }, h('label', {}, 'Ort der Runde (ungefähr)'), name, h('div', { class: 'row' }, info,
+            h('button', { class: 'btn small light', type: 'button', onclick: () => navigator.geolocation.getCurrentPosition((p) => {
+              placeVal = { lat: p.coords.latitude, lng: p.coords.longitude }; show();
+            }, () => toast('Standort nicht verfügbar'), { timeout: 15000 }) }, '📍 Mein Standort'),
+            h('button', { class: 'btn small light', type: 'button', onclick: () => { placeVal = null; show(); } }, 'Entfernen'))));
         } else if (f.t === 'button') {
           inner.append(h('button', {
             class: 'btn small light', type: 'button', onclick: () => {
@@ -228,7 +245,8 @@
       }
       return out;
     };
-    return { el: root, read };
+    const readPlace = () => (nested.place ? nested.place() : null);
+    return { el: root, read, readPlace };
   }
 
   /* --- Anmeldung --- */
@@ -254,12 +272,28 @@
       if (b.dataset.tab === 'accounts') loadAccounts();
       if (b.dataset.tab === 'gallery') loadGallery();
       if (b.dataset.tab === 'storage') loadStorage();
+      if (b.dataset.tab === 'reports') loadReports();
     });
   }
 
   /* --- Spieleliste --- */
   const STATUS = { lobby: 'Wartet auf Start', running: 'Läuft', ended: 'Beendet' };
-  const openEdit = new Set(), openPhotos = new Set(), openPlayers = new Set();
+  const openEdit = new Set(), openPhotos = new Set(), openPlayers = new Set(), openTeam = new Set();
+
+  /** Mit-Spielleitung (nur Besitzer/Admins ändern) und gesperrte Spieler */
+  function teamBox(g) {
+    const canEdit = g.mine || isSuper();
+    const user = h('input', { type: 'text', placeholder: 'Benutzername', maxlength: '20' });
+    return h('div', { class: 'stack' },
+      h('h3', {}, 'Mit-Spielleitung'),
+      h('p', { class: 'small muted' }, 'Darf die Runde starten, beenden, Einstellungen ändern, Spieler verwalten und Durchsagen machen – aber sie nicht löschen.'),
+      g.cohosts.length ? h('ul', { class: 'plist' }, g.cohosts.map((u) => h('li', {}, h('span', { class: 'grow' }, u),
+        canEdit && h('button', { class: 'btn small light', onclick: () => act(g.code, 'cohost', { username: u, remove: true }) }, 'Entfernen')))) : h('p', { class: 'small muted' }, 'Niemand.'),
+      canEdit ? h('div', { class: 'row' }, user, h('button', { class: 'btn small', onclick: async () => { if (user.value.trim() && await act(g.code, 'cohost', { username: user.value.trim() })) toast('Hinzugefügt'); } }, 'Hinzufügen')) : null,
+      h('h3', {}, 'Gesperrte Spieler'),
+      g.banned.length ? h('ul', { class: 'plist' }, g.banned.map((b) => h('li', {}, h('span', { class: 'grow' }, b.username),
+        h('button', { class: 'btn small light', onclick: () => act(g.code, 'unban', { accountId: b.id }) }, 'Sperre aufheben')))) : h('p', { class: 'small muted' }, 'Niemand. Sperren geht unter „Spieler“.'));
+  }
 
   async function act(code, action, body = {}) {
     try { await api(`/api/admin/games/${code}/${action}`, { method: 'POST', token, body }); load(); return true; }
@@ -319,6 +353,7 @@
           sel,
           h('button', { class: 'btn small light', onclick: () => act(g.code, 'give', { playerId: p.id, ability: sel.value }) }, 'Schenken'),
           (p.flags?.vpn || p.flags?.spoof) && h('button', { class: 'btn small light', onclick: () => act(g.code, 'clearflags', { playerId: p.id }) }, 'Verdacht löschen'),
+          h('button', { class: 'btn small light', title: 'Entfernen und für diese Runde sperren', onclick: () => confirm(`${p.name} entfernen und sperren? Er/sie kann dann nicht wieder beitreten.`) && act(g.code, 'ban', { playerId: p.id }) }, '🚫 Sperren'),
           h('button', { class: 'btn small light', onclick: () => confirm(`${p.name} aus dem Spiel entfernen?`) && act(g.code, 'kick', { playerId: p.id }) }, 'Entfernen'));
       })));
     } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
@@ -335,6 +370,9 @@
         h('h3', {}, `${g.name} `, h('span', { class: 'code' }, g.code)),
         h('span', { class: `chip ${g.status === 'running' ? 'runner' : g.status === 'ended' ? 'plain' : 'gold'}` }, STATUS[g.status])),
       g.youPlay ? h('p', { class: 'small' }, h('span', { class: 'chip gold' }, '🎮 Du spielst mit'), ' – Live-Karte, Spieler- und Foto-Verwaltung sind gesperrt, damit es fair bleibt.') : null,
+      g.cohost ? h('p', { class: 'small' }, h('span', { class: 'chip runner' }, 'Mit-Spielleitung'), ` – Runde von ${g.owner || '?'}`) : null,
+      g.settings.publicListed ? h('p', { class: 'small' }, h('span', { class: 'chip gold' }, '🌍 öffentlich'), g.place?.name ? ` · ${g.place.name}` : '') : null,
+      isSuper() && g.openReports ? h('p', { class: 'err small' }, `🚩 ${g.openReports} offene Meldung(en) – siehe Tab „Meldungen“`) : null,
       h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.spectators || 0} Zuschauer, ${g.photos} Fotos (${fmtBytes(g.bytes || 0)})`
         + (isSuper() && !g.mine ? ` · Spielleitung: ${g.owner || 'Admin'}` : '')),
       g.flagged.length ? h('p', { class: 'err small' }, `⚠️ Verdacht: ${g.flagged.map((f) => `${f.name} (${[f.flags.vpn && 'VPN', f.flags.spoof && 'GPS'].filter(Boolean).join(', ')})`).join(', ')}`) : null,
@@ -354,7 +392,8 @@
       g.status === 'ended' && g.photos > 0 && h('button', { class: 'btn small light', title: 'Gibt Speicher frei. Ergebnis, Karte und Verlauf bleiben erhalten.', onclick: async () => {
         if (confirm(`Alle ${g.photos} Fotos und Sprachnachrichten von „${g.name}“ löschen? Das Ergebnis bleibt erhalten.`) && await act(g.code, 'purgephotos')) toast('Fotos gelöscht');
       } }, '🗑️ Fotos löschen'),
-      h('button', {
+      h('button', { class: 'btn small light', onclick: () => toggle(openTeam, g.code) }, `👥 Mit-Spielleitung & Sperren${g.banned.length ? ` (${g.banned.length})` : ''}`),
+      (g.mine || isSuper()) && h('button', {
         class: 'btn small light', onclick: async () => {
           if (!confirm(`Spiel „${g.name}“ samt Fotos endgültig löschen?`)) return;
           try { await api(`/api/admin/games/${g.code}`, { method: 'DELETE', token }); openEdit.delete(g.code); load(); } catch (e) { toast(e.message); }
@@ -362,18 +401,23 @@
       }, 'Löschen'),
     );
     card.append(actions);
+    if (openTeam.has(g.code)) card.append(h('hr'), teamBox(g));
     if (openPlayers.has(g.code)) { const slot = h('div'); card.append(h('hr'), slot); playersBox(g).then((b) => slot.replaceWith(b)); }
     if (openPhotos.has(g.code)) { const slot = h('div'); card.append(h('hr'), slot); photosBox(g).then((b) => slot.replaceWith(b)); }
     if (openEdit.has(g.code)) {
-      const form = settingsForm(g.settings);
+      const form = settingsForm(g.settings, g.place);
       const name = h('input', { type: 'text', value: g.name, maxlength: '40' });
       card.append(
         h('hr'), h('div', {}, h('label', {}, 'Name'), name), form.el,
         h('button', {
           class: 'btn', onclick: async () => {
-            try { await api(`/api/admin/games/${g.code}`, { method: 'PATCH', token, body: { name: name.value, settings: form.read() } }); openEdit.delete(g.code); toast('Gespeichert'); load(); } catch (e) { toast(e.message); }
+            try { await api(`/api/admin/games/${g.code}`, { method: 'PATCH', token, body: { name: name.value, settings: form.read(), place: form.readPlace() } }); openEdit.delete(g.code); toast('Gespeichert'); load(); } catch (e) { toast(e.message); }
           },
         }, 'Einstellungen speichern'),
+        h('button', { class: 'btn small light', onclick: async () => {
+          const n = prompt('Name der Vorlage:', g.name); if (!n) return;
+          try { await api('/api/me/templates', { method: 'POST', token, body: { name: n, settings: form.read() } }); toast('Als Vorlage gespeichert'); } catch (e) { toast(e.message); }
+        } }, '💾 Als Vorlage speichern'),
       );
     }
     return card;
@@ -416,6 +460,52 @@
           h('button', { class: 'btn small light', onclick: async () => { if (confirm(`Statistik von ${a.username} zurücksetzen?`)) { await api(`/api/admin/accounts/${a.id}/resetstats`, { method: 'POST', token, body: {} }); loadAccounts(); } } }, 'Statistik zurücksetzen'),
           !a.isAdmin && h('button', { class: 'btn small light', onclick: async () => { if (confirm(`Account ${a.username} löschen?`)) { try { await api(`/api/admin/accounts/${a.id}`, { method: 'DELETE', token }); loadAccounts(); } catch (e) { toast(e.message); } } } }, 'Löschen'),
         )))));
+    } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
+  }
+
+  /* --- Vorlagen: eigene Regelwerke speichern und laden --- */
+  function templateBar(getForm, apply) {
+    const sel = h('select', {}, h('option', { value: '' }, 'Vorlage laden …'));
+    const refill = async () => {
+      try {
+        const { templates } = await api('/api/me/templates', { token });
+        sel.replaceChildren(h('option', { value: '' }, templates.length ? 'Vorlage laden …' : 'Noch keine Vorlagen'), ...templates.map((t) => h('option', { value: t.id }, t.name)));
+      } catch { /* z. B. Server-Passwort ohne Account */ }
+    };
+    sel.addEventListener('change', async () => {
+      if (!sel.value) return;
+      try { const t = await api(`/api/me/templates/${sel.value}`, { token }); await apply(t.settings); toast(`Vorlage „${t.name}“ geladen`); } catch (e) { toast(e.message); }
+    });
+    const del = h('button', { class: 'btn small light', type: 'button', onclick: async () => {
+      if (!sel.value || !confirm('Diese Vorlage löschen?')) return;
+      try { await api(`/api/me/templates/${sel.value}`, { method: 'DELETE', token }); refill(); } catch (e) { toast(e.message); }
+    } }, 'Löschen');
+    const saveBtn = h('button', { class: 'btn small light', type: 'button', onclick: async () => {
+      const name = prompt('Name der Vorlage:', ''); if (!name) return;
+      try { await api('/api/me/templates', { method: 'POST', token, body: { name, settings: getForm().read() } }); toast('Vorlage gespeichert'); refill(); } catch (e) { toast(e.message); }
+    } }, '💾 Als Vorlage speichern');
+    refill();
+    return h('div', { class: 'row' }, sel, del, saveBtn);
+  }
+
+  /* --- Meldungen (Admins) --- */
+  async function loadReports() {
+    const box = $('#tab-reports');
+    try {
+      const { reports } = await api('/api/admin/reports', { token });
+      const resolve = async (r, action) => { try { await api(`/api/admin/reports/${r.id}`, { method: 'POST', token, body: { action } }); loadReports(); } catch (e) { toast(e.message); } };
+      box.replaceChildren(h('div', { class: 'card stack' },
+        h('h2', {}, `Offene Meldungen (${reports.length})`),
+        reports.length ? h('ul', { class: 'plist' }, reports.map((r) => h('li', {},
+          r.kind === 'photo' && r.photoAvailable ? h('button', { class: 'thumb', onclick: () => { $('#lbImg').src = `/api/g/${r.code}/photo/${r.photoId}?t=${encodeURIComponent(token)}`; $('#lbCap').textContent = `${r.target || '?'} · ${r.gameName}`; $('#lightbox').showModal(); } },
+            h('img', { src: `/api/g/${r.code}/photo/${r.photoId}?t=${encodeURIComponent(token)}`, alt: '', style: 'width:64px;height:64px;object-fit:cover' })) : null,
+          h('div', { class: 'grow' },
+            h('div', { class: 'name' }, r.kind === 'photo' ? `📷 Foto von ${r.target || '?'}` : `👤 Spieler ${r.target}`, ` – ${r.reason}`),
+            h('div', { class: 'small muted' }, `${r.gameName} (${r.code}) · gemeldet von ${r.by} · ${clock(r.ts)}`, r.note ? ` · „${r.note}“` : '', r.kind === 'photo' && !r.photoAvailable ? ' · Foto schon weg' : '')),
+          r.kind === 'photo' && r.photoAvailable ? h('button', { class: 'btn small hunter', onclick: () => confirm('Foto löschen?') && resolve(r, 'deletephoto') }, 'Foto löschen') : null,
+          r.kind === 'player' ? h('button', { class: 'btn small hunter', onclick: () => confirm(`${r.target} aus der Runde entfernen und sperren?`) && resolve(r, 'ban') }, 'Sperren') : null,
+          h('button', { class: 'btn small light', onclick: () => resolve(r, 'dismiss') }, 'Erledigt'))))
+          : h('p', { class: 'muted' }, 'Keine offenen Meldungen. 🎉')));
     } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
   }
 
@@ -474,12 +564,13 @@
     for (const b of document.querySelectorAll('#dash .tabs [data-super]')) b.hidden = !isSuper();
     document.querySelector('#dash .tabs').hidden = !isSuper();
     $('#login').hidden = true; $('#dash').hidden = false; $('#logout').hidden = false;
-    const newForm = settingsForm(CAT.defaults);
-    $('#newForm').replaceChildren(newForm.el);
+    let newForm = settingsForm(CAT.defaults);
+    $('#newForm').replaceChildren(templateBar(() => newForm, async (settings) => { newForm = settingsForm(settings); $('#newForm').replaceChildren(templateBarEl, newForm.el); }), newForm.el);
+    const templateBarEl = $('#newForm').firstChild;
     $('#createBtn').onclick = async () => {
       $('#newErr').textContent = '';
       try {
-        await api('/api/admin/games', { method: 'POST', token, body: { name: $('#newName').value, settings: newForm.read() } });
+        await api('/api/admin/games', { method: 'POST', token, body: { name: $('#newName').value, settings: newForm.read(), place: newForm.readPlace() } });
         $('#newWrap').open = false; toast('Runde angelegt – schick jetzt den Link herum'); load();
       } catch (e) { $('#newErr').textContent = e.message; }
     };
@@ -487,6 +578,6 @@
   }
   if (token) start(); else showLogin();
   setInterval(() => {
-    if (!document.hidden && $('#tab-games') && !$('#tab-games').hidden && !document.querySelector('#games input:focus, #games select:focus, #games details[open]') && !openEdit.size && !openPhotos.size && !openPlayers.size) load();
+    if (!document.hidden && $('#tab-games') && !$('#tab-games').hidden && !document.querySelector('#games input:focus, #games select:focus, #games details[open]') && !openEdit.size && !openPhotos.size && !openPlayers.size && !openTeam.size) load();
   }, 10000);
 })();

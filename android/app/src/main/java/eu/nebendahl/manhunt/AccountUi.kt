@@ -358,6 +358,7 @@ fun HomeScreen(
         }
         // Jeder kann eigene Runden anlegen und leiten
         if (info == null) OutlinedButton(onClick = openAdmin, modifier = Modifier.fillMaxWidth()) { Text("➕ Eigene Runde erstellen") }
+        if (info == null) PublicGamesCard(account) { c -> code = c; info = null; error = null; lookup() }
         // Weitere Bereiche als Kacheln
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
         val requests = friends?.incoming?.size ?: 0

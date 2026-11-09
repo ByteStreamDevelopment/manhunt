@@ -28,6 +28,15 @@ window.MH = (() => {
     token() { const a = account.get(); return a && a.token; },
   };
 
+  /** Grund für eine Meldung abfragen (null = abgebrochen) */
+  const REPORT_REASONS = ['Unangemessen', 'Privatsphäre', 'Beleidigung', 'Schummeln', 'Spam', 'Sonstiges'];
+  function askReport(what) {
+    const n = prompt(`${what} melden – warum?\n${REPORT_REASONS.map((r, i) => `${i + 1} = ${r}`).join('\n')}\n\nZahl eingeben:`, '1');
+    if (n === null) return null;
+    const reason = REPORT_REASONS[Number(n) - 1] || 'Sonstiges';
+    const note = prompt('Optional: kurze Beschreibung für die Admins', '') ?? '';
+    return { reason, note };
+  }
   async function api(path, { method = 'GET', body, token, contentType, acc } = {}) {
     const headers = {};
     if (token) headers['x-token'] = token;
@@ -110,5 +119,5 @@ window.MH = (() => {
       msg);
   }
 
-  return { $, h, api, dur, ago, clock, toast, account, enablePush, pushCard, isIos, standalone };
+  return { $, h, api, dur, ago, clock, toast, account, enablePush, pushCard, isIos, standalone, askReport };
 })();

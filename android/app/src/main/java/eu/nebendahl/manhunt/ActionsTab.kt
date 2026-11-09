@@ -374,7 +374,8 @@ fun FreezeOverlay(st: GameState, serverNow: Long) {
 @Composable
 private fun HostCard(st: GameState) {
     val account = GameRepository.account.collectAsState().value ?: return
-    val mine = st.game.owner?.equals(account.username, ignoreCase = true) ?: account.isAdmin
+    val mine = (st.game.owner?.equals(account.username, ignoreCase = true) ?: account.isAdmin) ||
+        st.game.cohosts.any { it.equals(account.username, ignoreCase = true) }
     if (!mine || st.game.status == "ended") return
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()

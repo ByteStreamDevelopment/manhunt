@@ -34,4 +34,24 @@ class HostingTest {
         assertTrue(l.games.all { it.mine })
         assertEquals(50, Storage(512L * 1024 * 1024, 1024L * 1024 * 1024).percent)
     }
+
+    @Test fun publicGames() {
+        val l = parsePublicGames(res("public_games.json"))
+        assertEquals(2, l.size)
+        assertEquals(1.4, l[0].km!!, 0.001)
+        assertEquals("Alexanderplatz", l[0].place)
+        assertNull(l[1].km)
+        assertTrue(l[1].joined)
+    }
+
+    @Test fun teamAndBans() {
+        val g = parseAdminList(res("admin_games_team.json")).games.single()
+        assertTrue(g.cohost)
+        assertFalse(g.mine)
+        assertEquals(listOf("Ida"), g.cohosts)
+        assertEquals("Zed", g.banned.single().username)
+        assertEquals("Stadtpark", g.place?.name)
+        assertEquals(2, g.openReports)
+        assertTrue(g.publicListed)
+    }
 }

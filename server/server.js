@@ -50,6 +50,10 @@ const USER_QUOTA_MB = Math.max(1, Number(process.env.USER_QUOTA_MB) || 1024);
 const MAX_OPEN_GAMES = Math.max(1, Number(process.env.MAX_OPEN_GAMES) || 3);
 /** Laufende Runden enden spätestens nach so vielen Stunden automatisch (vergessene Runden) */
 const MAX_GAME_HOURS = Math.max(1, Number(process.env.MAX_GAME_HOURS) || 24);
+/** Fotos und Sprachnachrichten beendeter Runden werden nach so vielen Tagen gelöscht (0 = nie). Galerie und Vitrine bleiben. */
+const PHOTO_RETENTION_DAYS = Number(process.env.PHOTO_RETENTION_DAYS ?? 30);
+const MAX_COHOSTS = 5;
+const MAX_TEMPLATES = 20;
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 fs.mkdirSync(GALLERY_DIR, { recursive: true });
@@ -128,6 +132,7 @@ const DEFAULTS = {
   quests: defaultQuests(),
   customQuests: [],              // eigene Quests der Spielleitung (Foto oder fester Ort)
   adminGiftsEnabled: false,      // Spielleitung darf Fähigkeiten verschenken (Standard: aus, sonst unfair)
+  publicListed: false,           // Runde erscheint unter „Offene Runden“ (jeder mit Account kann sie finden und beitreten)
 };
 const LIMITS = {
   locationIntervalSec: [10, 3600], headStartMin: [0, 600], autoEndAfterMin: [0, 1440],
@@ -219,11 +224,12 @@ const store = new Store(SQLITE_FILE);
 if (store.migrateJson(DB_FILE)) console.log('[manhunt] Alte db.json nach SQLite übernommen (db.json.migrated).');
 let db = store.load();
 if (!db.secret) db.secret = crypto.randomBytes(32).toString('hex');
-db.accounts ||= {}; db.gallery ||= [];
+db.accounts ||= {}; db.gallery ||= []; db.reports ||= [];
 // Ältere Spielstände auf das aktuelle Format bringen
 for (const g of Object.values(db.games)) {
   g.settings = sanitizeSettings(g.settings, g.settings || DEFAULTS);
   g.effects ||= []; g.pickups ||= []; g.photos ||= []; g.messages ||= []; g.locations ||= []; g.chat ||= [];
+  g.cohosts ||= []; g.banned ||= [];
   for (const p of Object.values(g.players)) { migratePlayer(p); p.gameCode = g.code; }
   indexLocations(g);
   // Dateigrößen für das Speicherkontingent nachtragen (ältere Spielstände)
@@ -278,6 +284,15 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flush(); store.
 
 /* Datenschutz: Standortdaten beendeter Spiele nach RETENTION_DAYS löschen (stündlich geprüft) */
 function applyRetention() {
+  // Fotos/Sprachnachrichten beendeter Runden nach PHOTO_RETENTION_DAYS löschen (gibt Speicher frei)
+  if (PHOTO_RETENTION_DAYS > 0) {
+    const pcut = Date.now() - PHOTO_RETENTION_DAYS * 864e5;
+    for (const g of Object.values(db.games)) {
+      if (g.status === 'ended' && g.endedAt && g.endedAt < pcut && (g.photos.length || g.chat.some((c) => c.voice))) {
+        purgeGameMedia(g); g.photosExpiredAt = Date.now(); save();
+      }
+    }
+  }
   if (!(RETENTION_DAYS > 0)) return;
   const cutoff = Date.now() - RETENTION_DAYS * 864e5;
   for (const g of Object.values(db.games)) {
@@ -545,7 +560,7 @@ function newGame(name, settings, owner = null) {
   const code = newCode();
   db.games[code] = {
     code, name, status: 'lobby', createdAt: Date.now(), startedAt: null, endedAt: null,
-    ownerId: owner ? owner.id : null, ownerName: owner ? owner.username : null,
+    ownerId: owner ? owner.id : null, ownerName: owner ? owner.username : null, cohosts: [], banned: [], place: null,
     settings: sanitizeSettings(settings), players: {}, locations: [], photos: [], messages: [],
     effects: [], pickups: [], nextPickupAt: 0, chat: [], _byPid: new Map(),
   };
@@ -683,6 +698,13 @@ function chatChannel(g, pl, requested) {
 }
 function deleteVoiceFiles(code) {
   try { for (const f of fs.readdirSync(VOICE_DIR)) if (f.startsWith(code + '_')) fs.unlinkSync(path.join(VOICE_DIR, f)); } catch { /* egal */ }
+}
+/** Fotos und Sprachnachrichten einer Runde löschen, Ergebnis und Verlauf bleiben */
+function purgeGameMedia(g) {
+  deletePhotoFiles(g.code); deleteVoiceFiles(g.code);
+  g.photos = []; for (const c of g.chat) if (c.voice) { c.voice = null; c.text ||= '🎙️ (gelöscht)'; }
+  g.quotaFullAt = null;
+  db.reports = (db.reports || []).filter((r) => !(r.code === g.code && r.kind === 'photo'));
 }
 function deletePhotoFiles(code) {
   try {
@@ -1358,7 +1380,10 @@ function buildState(g, auth) {
   const gallerySet = new Set(db.gallery.map((x) => x.photoId));
   return {
     now,
-    game: { code: g.code, name: g.name, status: g.status, startedAt: g.startedAt, endedAt: g.endedAt, releaseAt, owner: g.ownerName || null },
+    game: {
+      code: g.code, name: g.name, status: g.status, startedAt: g.startedAt, endedAt: g.endedAt, releaseAt, owner: g.ownerName || null,
+      cohosts: (g.cohosts || []).map((id) => db.accounts[id]?.username).filter(Boolean),
+    },
     // Spielleitung: darf Fotos in die Galerie übernehmen (nur Admins)?
     canFeature: isAdmin ? !!auth.mgr?.superAdmin : undefined,
     settings: s,
@@ -1447,7 +1472,9 @@ async function handleMe(req, res, url) {
     res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': data.length, 'Cache-Control': 'public, max-age=604800, immutable' });
     return res.end(data);
   }
-  const a = accountFromToken(req.headers['x-account'] || req.headers['x-token']);
+  // Konto-Token oder Admin-Token mit Namen (Website /admin)
+  const tok = req.headers['x-account'] || req.headers['x-token'];
+  const a = accountFromToken(tok) || (checkAdminToken(tok)?.username ? findAccount(checkAdminToken(tok).username) : null);
   if (!a) throw new HttpError(401, 'Bitte melde dich an');
   if (p === '/api/me/avatar' && m === 'POST') {
     rateLimit(req, 'avatar', 20, 3600e3);
@@ -1463,6 +1490,30 @@ async function handleMe(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
   if (p === '/api/me/photos' && m === 'GET') return sendJSON(res, 200, { photos: myPhotos(a) });
+  // Vorlagen: eigene Regelwerke speichern und für neue Runden wiederverwenden
+  if (p === '/api/me/templates' && m === 'GET') return sendJSON(res, 200, { templates: (a.templates || []).map(({ id, name, createdAt }) => ({ id, name, createdAt })) });
+  if (p === '/api/me/templates' && m === 'POST') {
+    const b = await readJSON(req);
+    const name = cleanText(b.name, 40);
+    if (!name) throw new HttpError(400, 'Bitte einen Namen eingeben');
+    a.templates ||= [];
+    const settings = sanitizeSettings(b.settings);
+    const old = a.templates.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    if (old) { old.settings = settings; old.createdAt = Date.now(); }
+    else {
+      if (a.templates.length >= MAX_TEMPLATES) throw new HttpError(409, `Höchstens ${MAX_TEMPLATES} Vorlagen`);
+      a.templates.push({ id: rid(4), name, settings, createdAt: Date.now() });
+    }
+    save();
+    return sendJSON(res, 201, { ok: true, templates: a.templates.map(({ id, name: n, createdAt }) => ({ id, name: n, createdAt })) });
+  }
+  const tm = p.match(/^\/api\/me\/templates\/([a-f0-9]{8})$/);
+  if (tm) {
+    const t = (a.templates || []).find((x) => x.id === tm[1]);
+    if (!t) throw new HttpError(404, 'Vorlage nicht gefunden');
+    if (m === 'GET') return sendJSON(res, 200, { id: t.id, name: t.name, settings: sanitizeSettings(t.settings) });
+    if (m === 'DELETE') { a.templates = a.templates.filter((x) => x !== t); save(); return sendJSON(res, 200, { ok: true }); }
+  }
   // Konto selbst löschen (Datenschutz): Passwort zur Bestätigung. Admin-Konten nur über den Server.
   if (p === '/api/me/delete' && m === 'POST') {
     rateLimit(req, 'delete', 10, 3600e3);
@@ -1546,6 +1597,29 @@ async function handleApi(req, res, url) {
     return sendJSON(res, 200, { sort, season, currentSeason: social.seasonKey(), rows });
   }
   if (p.startsWith('/api/me/') || p.startsWith('/api/avatar/') || p.startsWith('/api/showcase/')) return handleMe(req, res, url);
+  // Offene Runden: öffentlich gelistete Runden (Lobby oder laufend), nach Entfernung sortiert
+  if (m === 'GET' && p === '/api/public-games') {
+    const lat = Number(url.searchParams.get('lat')), lng = Number(url.searchParams.get('lng'));
+    const here = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng);
+    const maxKm = Math.min(500, Math.max(1, Number(url.searchParams.get('km')) || 50));
+    const acc = accountFromToken(req.headers['x-account'] || req.headers['x-token']);
+    let rows = Object.values(db.games)
+      .filter((g) => g.settings.publicListed && g.status !== 'ended' && Object.keys(g.players).length < MAX_PLAYERS && !(acc && (g.banned || []).includes(acc.id)))
+      .map((g) => {
+        const ps = Object.values(g.players);
+        const c = g.settings.zoneEnabled ? { lat: g.settings.zoneLat, lng: g.settings.zoneLng } : g.place;
+        const km = here && c ? haversine(lat, lng, c.lat, c.lng) / 1000 : null;
+        return {
+          code: g.code, name: g.name, status: g.status, owner: g.ownerName || null, createdAt: g.createdAt, startedAt: g.startedAt,
+          runners: ps.filter((x) => x.role === 'runner').length, hunters: ps.filter((x) => x.role === 'hunter').length,
+          place: g.place?.name || null, km: km == null ? null : Math.round(km * 10) / 10,
+          joined: !!(acc && ps.some((x) => x.accountId === acc.id)),
+        };
+      });
+    if (here) rows = rows.filter((r) => r.km == null || r.km <= maxKm).sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
+    else rows.sort((a, b) => b.createdAt - a.createdAt);
+    return sendJSON(res, 200, { games: rows.slice(0, 50) });
+  }
 
   if (m === 'GET' && p === '/api/gallery') {
     return sendJSON(res, 200, { items: [...db.gallery].sort((a, b) => b.featuredAt - a.featuredAt).map(({ id, username, gameName, ts, caption, featuredAt, quest }) => ({ id, username, gameName, ts, caption, featuredAt, quest })) });
@@ -1598,7 +1672,9 @@ function managerFor(t) {
   return { superAdmin: isAdminAccount(a), account: a, name: a.username };
 }
 const isOwner = (mgr, g) => !!(mgr && mgr.account && g.ownerId && g.ownerId === mgr.account.id);
-const canManage = (mgr, g) => !!mgr && (mgr.superAdmin || isOwner(mgr, g));
+/** Mit-Spielleitung: vom Besitzer ernannt, darf alles außer Runde löschen und Mit-Spielleitung ändern */
+const isCohost = (mgr, g) => !!(mgr && mgr.account && (g.cohosts || []).includes(mgr.account.id));
+const canManage = (mgr, g) => !!mgr && (mgr.superAdmin || isOwner(mgr, g) || isCohost(mgr, g));
 /**
  * Spielt die Spielleitung in diesem Spiel selbst mit (als Runner/Hunter, Spiel nicht beendet)?
  * Dann bekommt sie keine Vorteile: keine Rundumsicht, keine Geschenke, kein Fangen/Entfernen usw.
@@ -1628,6 +1704,7 @@ function storageInfo(a) {
 /** Konto wird gelöscht: eigene Runden beenden, deren Fotos löschen; Ergebnis und Verlauf bleiben für die Mitspieler */
 function releaseOwnedGames(a) {
   for (const g of Object.values(db.games)) {
+    g.cohosts = (g.cohosts || []).filter((id) => id !== a.id);
     if (g.ownerId !== a.id) continue;
     if (g.status === 'running') endGame(g, 'Die Spielleitung hat ihr Konto gelöscht.');
     if (g.status === 'lobby') { deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; continue; }
@@ -1672,6 +1749,11 @@ function adminSummary(g, mgr = null) {
     flagged: ps.filter((p) => p.flags && (p.flags.vpn || p.flags.spoof)).map((p) => ({ id: p.id, name: p.name, flags: p.flags })),
     owner: g.ownerName || null, bytes: gameBytes(g),
     mine: mgr ? isOwner(mgr, g) : undefined,
+    cohost: mgr ? isCohost(mgr, g) : undefined,
+    cohosts: (g.cohosts || []).map((id) => db.accounts[id]?.username).filter(Boolean),
+    banned: (g.banned || []).map((id) => ({ id, username: db.accounts[id]?.username || '?' })),
+    place: g.place || null,
+    openReports: (db.reports || []).filter((r) => r.code === g.code && !r.resolved).length,
     youPlay: mgr ? managerPlaysIn(g, mgr) : undefined,
   };
 }
@@ -1682,6 +1764,45 @@ function checkCanCreate(mgr) {
   const open = Object.values(db.games).filter((g) => g.ownerId === a.id && g.status !== 'ended').length;
   if (open >= MAX_OPEN_GAMES) throw new HttpError(409, `Du hast schon ${open} offene Runden. Beende oder lösche zuerst eine (höchstens ${MAX_OPEN_GAMES} gleichzeitig).`);
   if (usageOf(a) >= quotaOf(a) * 0.95) throw new HttpError(507, `Dein Speicherplatz (${fmtMb(quotaOf(a))}) ist voll. Lösche alte Runden oder deren Fotos.`);
+}
+
+/** Ungefährer Ort der Runde für „Offene Runden“ (auf ~1 km gerundet, damit niemand genau weiß, wo man wohnt) */
+function setPlace(g, pl) {
+  if (!pl) { g.place = null; return; }
+  const lat = Number(pl.lat), lng = Number(pl.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new HttpError(400, 'Ungültiger Ort');
+  g.place = { lat: Math.round(lat * 100) / 100, lng: Math.round(lng * 100) / 100, name: cleanText(pl.name, 60) || null };
+}
+function banPlayer(g, pl) {
+  delete g.players[pl.id]; clearLocations(g, pl.id); g.photos = g.photos.filter((x) => x.pid !== pl.id);
+  g.banned ||= [];
+  if (pl.accountId && !g.banned.includes(pl.accountId)) g.banned.push(pl.accountId);
+  pushMsg(g, `🚫 ${pl.name} wurde aus der Runde entfernt und gesperrt.`);
+}
+function reportView(r) {
+  const g = db.games[r.code];
+  return {
+    id: r.id, kind: r.kind, code: r.code, gameName: g?.name || r.gameName, ts: r.ts, reason: r.reason, note: r.note || '',
+    by: db.accounts[r.by]?.username || '?', photoId: r.photoId || null, playerId: r.playerId || null,
+    target: r.targetName || null, resolved: r.resolved || null, action: r.action || null,
+    photoAvailable: !!(r.kind === 'photo' && g && g.photos.some((x) => x.id === r.photoId)),
+  };
+}
+const REPORT_REASONS = ['Unangemessen', 'Privatsphäre', 'Beleidigung', 'Schummeln', 'Spam', 'Sonstiges'];
+function addReport(req, g, pl, data) {
+  rateLimit(req, 'report', 20, 3600e3);
+  if (!pl.accountId) throw new HttpError(403, 'Melden nur mit Account');
+  const key = data.photoId || data.playerId;
+  if (db.reports.some((r) => r.by === pl.accountId && r.code === g.code && (r.photoId || r.playerId) === key && !r.resolved)) throw new HttpError(409, 'Das hast du schon gemeldet');
+  const reason = REPORT_REASONS.includes(data.reason) ? data.reason : 'Sonstiges';
+  const r = { ...data, id: rid(5), ts: Date.now(), code: g.code, gameName: g.name, by: pl.accountId, reason, note: cleanText(data.note, 300), resolved: null };
+  db.reports.push(r);
+  if (db.reports.length > 1000) db.reports.splice(0, db.reports.length - 1000);
+  // Admins benachrichtigen; bei Spieler-Meldungen auch die Spielleitung der Runde
+  const body = `${pl.name} meldet ${data.kind === 'photo' ? 'ein Foto' : data.targetName} in „${g.name}“: ${reason}`;
+  for (const a of Object.values(db.accounts)) if (isAdminAccount(a)) social.notifyAccount(a.id, { title: '🚩 Neue Meldung', body, url: '/admin', tag: 'report' });
+  if (data.kind === 'player') for (const id of [g.ownerId, ...(g.cohosts || [])].filter(Boolean)) social.notifyAccount(id, { title: '🚩 Spieler gemeldet', body, url: '/admin', tag: 'report' });
+  save();
 }
 
 async function handleAdmin(req, res, url) {
@@ -1701,7 +1822,7 @@ async function handleAdmin(req, res, url) {
   if (p === '/api/admin/games' && m === 'GET') {
     // Admins sehen alle Runden (mit ?mine=1 nur die eigenen), alle anderen nur ihre eigenen
     const onlyMine = !mgr.superAdmin || url.searchParams.get('mine') === '1';
-    const games = Object.values(db.games).filter((g) => (onlyMine ? isOwner(mgr, g) : true))
+    const games = Object.values(db.games).filter((g) => (onlyMine ? isOwner(mgr, g) || isCohost(mgr, g) : true))
       .sort((a, b) => b.createdAt - a.createdAt).map((g) => adminSummary(g, mgr));
     return sendJSON(res, 200, {
       games, superAdmin: mgr.superAdmin, maxOpenGames: MAX_OPEN_GAMES,
@@ -1713,9 +1834,39 @@ async function handleAdmin(req, res, url) {
     checkCanCreate(mgr);
     const b = await readJSON(req);
     const g = newGame(cleanText(b.name, 40) || 'Manhunt', b.settings, mgr.account);
+    if (b.place) setPlace(g, b.place);
     return sendJSON(res, 201, adminSummary(g, mgr));
   }
-  if (p.startsWith('/api/admin/accounts') || p.startsWith('/api/admin/gallery') || p.startsWith('/api/admin/photos') || p === '/api/admin/storage') superOnly();
+  if (p.startsWith('/api/admin/accounts') || p.startsWith('/api/admin/gallery') || p.startsWith('/api/admin/photos') || p === '/api/admin/storage' || p.startsWith('/api/admin/reports')) superOnly();
+  // Meldungen (nur Admins): Fotos und Spieler
+  if (p === '/api/admin/reports' && m === 'GET') {
+    const all = url.searchParams.get('all') === '1';
+    return sendJSON(res, 200, { reports: db.reports.filter((r) => all || !r.resolved).sort((a, b) => b.ts - a.ts).slice(0, 200).map(reportView) });
+  }
+  const rr = p.match(/^\/api\/admin\/reports\/([a-f0-9]+)$/);
+  if (rr && m === 'POST') {
+    const rep = db.reports.find((x) => x.id === rr[1]);
+    if (!rep) throw new HttpError(404, 'Meldung nicht gefunden');
+    const b = await readJSON(req);
+    const g = db.games[rep.code];
+    if (b.action === 'deletephoto' && rep.kind === 'photo' && g) {
+      const i = g.photos.findIndex((x) => x.id === rep.photoId);
+      if (i >= 0) {
+        const [ph] = g.photos.splice(i, 1);
+        await fsp.unlink(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`)).catch(() => {});
+        const owner = g.players[ph.pid];
+        if (owner) inbox(owner, '🚫 Eins deiner Fotos wurde nach einer Meldung von den Admins entfernt.', 'bad');
+        notify(g.code);
+      }
+    } else if (b.action === 'ban' && rep.kind === 'player' && g) {
+      const pl = g.players[rep.playerId];
+      if (pl) banPlayer(g, pl);
+    } else if (b.action !== 'dismiss') throw new HttpError(400, 'Unbekannte Aktion');
+    // Alle offenen Meldungen zum selben Foto/Spieler mit erledigen
+    for (const x of db.reports) if (x.code === rep.code && x.kind === rep.kind && (x.photoId || x.playerId) === (rep.photoId || rep.playerId)) { x.resolved = Date.now(); x.action = b.action; }
+    save();
+    return sendJSON(res, 200, { ok: true });
+  }
   // Speicherübersicht aller Accounts (nur Admins)
   if (p === '/api/admin/storage' && m === 'GET') {
     const rows = Object.values(db.accounts).map((a) => ({ id: a.id, username: a.username, ...storageInfo(a), games: Object.values(db.games).filter((g) => g.ownerId === a.id).length }))
@@ -1781,6 +1932,7 @@ async function handleAdmin(req, res, url) {
 
   // Löschen: Admins jede Runde, alle anderen ihre eigenen (gibt den Speicher frei)
   if (!act && m === 'DELETE') {
+    if (!mgr.superAdmin && !isOwner(mgr, g)) throw new HttpError(403, 'Nur wer die Runde angelegt hat, kann sie löschen.');
     if (g.status === 'running' && !mgr.superAdmin) throw new HttpError(409, 'Beende die Runde zuerst, bevor du sie löschst.');
     deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; save();
     for (const res2 of sseClients.get(g.code) || []) res2.end();
@@ -1793,25 +1945,47 @@ async function handleAdmin(req, res, url) {
     if (playing && g.status !== 'lobby' && b.settings) throw new HttpError(403, `${PLAYING_ADMIN} Einstellungen nur in der Lobby.`);
     if (b.name !== undefined) g.name = cleanText(b.name, 40) || g.name;
     if (b.settings) g.settings = sanitizeSettings(b.settings, g.settings);
+    if (b.place !== undefined) setPlace(g, b.place);
     save(); notify(g.code);
     return sendJSON(res, 200, adminSummary(g, mgr));
   }
   if (m === 'POST') {
     const b = await readJSON(req);
     // Mitspielende Spielleitung: nur neutrale Aktionen (starten, beenden, zurücksetzen, Durchsage)
-    if (playing && !['start', 'end', 'reset', 'announce', 'purgephotos'].includes(act)) throw new HttpError(403, PLAYING_ADMIN);
+    if (playing && !['start', 'end', 'reset', 'announce', 'purgephotos', 'cohost', 'unban'].includes(act)) throw new HttpError(403, PLAYING_ADMIN);
     if (act === 'start') startGame(g);
     else if (act === 'end') endGame(g, 'Beendet von der Spielleitung.');
     else if (act === 'reset') resetGame(g);
     else if (act === 'purgephotos') {
       // Fotos und Sprachnachrichten dieser Runde löschen, Ergebnis und Verlauf bleiben (gibt Speicher frei)
       if (g.status === 'running') throw new HttpError(409, 'Fotos lassen sich erst nach Spielende löschen.');
-      deletePhotoFiles(g.code); deleteVoiceFiles(g.code);
-      g.photos = []; for (const c of g.chat) if (c.voice) { c.voice = null; c.text ||= '🎙️ (gelöscht)'; }
-      g.photosPurgedAt = Date.now(); g.quotaFullAt = null;
+      purgeGameMedia(g); g.photosPurgedAt = Date.now();
     }
     else if (act === 'announce') { const t = cleanText(b.text, 300); if (!t) throw new HttpError(400, 'Nachricht fehlt'); pushMsg(g, t, 'admin'); }
     else if (act === 'kick') { delete g.players[b.playerId]; clearLocations(g, b.playerId); g.photos = g.photos.filter((x) => x.pid !== b.playerId); }
+    else if (act === 'ban') {
+      // Entfernen und sperren: kann mit diesem Account nicht wieder beitreten
+      const pl = g.players[b.playerId];
+      if (!pl) throw new HttpError(404, 'Spieler nicht gefunden');
+      if (pl.accountId && (pl.accountId === g.ownerId || (mgr.account && pl.accountId === mgr.account.id))) throw new HttpError(409, 'Die Spielleitung kann nicht gesperrt werden');
+      banPlayer(g, pl);
+    } else if (act === 'unban') {
+      g.banned = (g.banned || []).filter((id) => id !== b.accountId);
+    } else if (act === 'cohost') {
+      // Mit-Spielleitung ernennen/entfernen: nur Besitzer oder Admins
+      if (!mgr.superAdmin && !isOwner(mgr, g)) throw new HttpError(403, 'Nur wer die Runde angelegt hat, kann die Mit-Spielleitung ändern.');
+      const a = findAccount(b.username);
+      if (!a || !a.verified) throw new HttpError(404, 'Account nicht gefunden');
+      if (a.id === g.ownerId) throw new HttpError(409, 'Das ist schon die Spielleitung');
+      g.cohosts ||= [];
+      if (b.remove) g.cohosts = g.cohosts.filter((id) => id !== a.id);
+      else {
+        if (g.cohosts.includes(a.id)) throw new HttpError(409, `${a.username} ist schon Mit-Spielleitung`);
+        if (g.cohosts.length >= MAX_COHOSTS) throw new HttpError(409, `Höchstens ${MAX_COHOSTS} Mit-Spielleiter`);
+        g.cohosts.push(a.id);
+        social.notifyAccount(a.id, { title: '🎮 Mit-Spielleitung', body: `${mgr.name || 'Die Spielleitung'} hat dich zur Mit-Spielleitung von „${g.name}“ gemacht.`, url: '/admin', tag: 'cohost' });
+      }
+    }
     else if (act === 'give') {
       if (!g.settings.adminGiftsEnabled) throw new HttpError(403, 'Fähigkeiten verschenken ist in diesem Spiel aus (Einstellung „Spielleitung darf Fähigkeiten verschenken“).');
       const pl = g.players[b.playerId];
@@ -1919,6 +2093,7 @@ async function handleGame(req, res, url, code, rest) {
     if (!acc.verified) throw new HttpError(403, 'Bitte bestätige zuerst deine E-Mail-Adresse.', { needsVerification: true });
     if (!['runner', 'hunter', 'spectator'].includes(b.role)) throw new HttpError(400, 'Bitte eine Rolle wählen');
     if (b.role === 'spectator' && !g.settings.spectatorsEnabled) throw new HttpError(403, 'In diesem Spiel sind keine Zuschauer erlaubt');
+    if ((g.banned || []).includes(acc.id)) throw new HttpError(403, 'Du wurdest aus dieser Runde gesperrt.');
     // Schon in diesem Spiel? Dann wieder anmelden (Rolle nur in der Lobby änderbar)
     const existing = Object.values(g.players).find((p) => p.accountId === acc.id);
     if (existing) {
@@ -2123,6 +2298,26 @@ async function handleGame(req, res, url, code, rest) {
     if (owner && emoji && before !== emoji) inbox(owner, `${emoji} ${pl.name} reagiert auf dein Foto`, 'info');
     save(); notify(g.code);
     return sendJSON(res, 200, { ok: true, reaction: photo.reactions[pl.id] || null });
+  }
+
+  // Foto melden (an die Admins)
+  const rpm = rest.match(/^photo\/([a-f0-9]{12})\/report$/);
+  if (rpm && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    const photo = g.photos.find((x) => x.id === rpm[1]);
+    if (!photo || !buildState(g, auth).photos.some((x) => x.id === photo.id)) throw new HttpError(404, 'Foto nicht gefunden');
+    const b = await readJSON(req);
+    addReport(req, g, pl, { kind: 'photo', photoId: photo.id, targetName: g.players[photo.pid]?.name || null, reason: b.reason, note: b.note });
+    return sendJSON(res, 201, { ok: true });
+  }
+  // Spieler melden (an Admins und Spielleitung)
+  if (rest === 'report' && m === 'POST') {
+    if (!pl) throw new HttpError(403, 'Nur für Spieler');
+    const b = await readJSON(req);
+    const target = g.players[b.playerId];
+    if (!target || target.id === pl.id) throw new HttpError(404, 'Spieler nicht gefunden');
+    addReport(req, g, pl, { kind: 'player', playerId: target.id, targetAccountId: target.accountId || null, targetName: target.name, reason: b.reason, note: b.note });
+    return sendJSON(res, 201, { ok: true });
   }
 
   const ph = rest.match(/^photo\/([a-f0-9]{12})$/);
