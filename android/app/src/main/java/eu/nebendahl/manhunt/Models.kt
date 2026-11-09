@@ -81,6 +81,8 @@ data class GameInfo(
     val releaseAt: Long?,
     /** Wer die Runde angelegt hat (null = Admin/alt) */
     val owner: String? = null,
+    /** Mit-Spielleitung (Benutzernamen) */
+    val cohosts: List<String> = emptyList(),
 )
 
 data class AbilityCount(val key: String, val count: Int)
@@ -220,7 +222,34 @@ data class AdminGame(
     val bytes: Long = 0,
     /** Eigene Runde? */
     val mine: Boolean = true,
+    /** Man ist Mit-Spielleitung dieser Runde */
+    val cohost: Boolean = false,
+    val cohosts: List<String> = emptyList(),
+    val banned: List<BannedPlayer> = emptyList(),
+    val place: GamePlace? = null,
+    /** Offene Meldungen (nur für Admins) */
+    val openReports: Int = 0,
+) {
+    val publicListed: Boolean get() = runCatching { JSONObject(settingsJson).optBoolean("publicListed") }.getOrDefault(false)
+}
+data class BannedPlayer(val accountId: String, val username: String)
+data class GamePlace(val lat: Double, val lng: Double, val name: String?)
+
+/** Öffentlich gelistete Runde („Offene Runden“) */
+data class PublicGame(
+    val code: String, val name: String, val status: String, val owner: String?, val runners: Int, val hunters: Int,
+    val place: String?, val km: Double?, val joined: Boolean,
 )
+fun parsePublicGames(j: JSONObject): List<PublicGame> = j.getJSONArray("games").objects().map {
+    PublicGame(
+        it.getString("code"), it.optString("name"), it.optString("status"), it.strOrNull("owner"), it.optInt("runners"), it.optInt("hunters"),
+        it.strOrNull("place"), if (it.isNull("km") || !it.has("km")) null else it.optDouble("km"), it.optBoolean("joined"),
+    )
+}
+
+/** Gespeichertes Regelwerk */
+data class GameTemplate(val id: String, val name: String)
+fun parseTemplates(j: JSONObject): List<GameTemplate> = j.getJSONArray("templates").objects().map { GameTemplate(it.getString("id"), it.optString("name")) }
 
 /** Speicherkontingent: quota = null bedeutet unbegrenzt (Admins) */
 data class Storage(val used: Long, val quota: Long?) {
@@ -250,6 +279,11 @@ fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").ob
         g.optJSONObject("settings")?.toString() ?: "{}",
         g.optBoolean("youPlay"),
         g.strOrNull("owner"), g.optLong("bytes"), g.optBoolean("mine", true),
+        g.optBoolean("cohost"),
+        g.optJSONArray("cohosts")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
+        g.optJSONArray("banned")?.objects()?.map { BannedPlayer(it.getString("id"), it.optString("username")) } ?: emptyList(),
+        g.optJSONObject("place")?.let { GamePlace(it.optDouble("lat"), it.optDouble("lng"), it.strOrNull("name")) },
+        g.optInt("openReports"),
     )
 }
 
@@ -441,6 +475,7 @@ fun parseState(j: JSONObject): GameState {
         game = GameInfo(
             g.getString("code"), g.getString("name"), g.getString("status"),
             g.longOrNull("startedAt"), g.longOrNull("endedAt"), g.longOrNull("releaseAt"), g.strOrNull("owner"),
+            g.optJSONArray("cohosts")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
         ),
         canFeature = j.optBoolean("canFeature"),
         settings = Settings(

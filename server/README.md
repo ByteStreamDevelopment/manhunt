@@ -29,6 +29,15 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.6.1: Mit-Spielleitung, Melden, Sperren, Vorlagen, offene Runden
+
+* **Mit-Spielleitung:** Wer eine Runde angelegt hat, ernennt bis zu 5 Mit-Spielleiter (Benutzername). Sie dürfen starten, beenden, Einstellungen ändern, Spieler verwalten und Durchsagen machen – aber die Runde nicht löschen und keine weitere Mit-Spielleitung ernennen.
+* **Melden:** Spieler melden Fotos (🚩 in der Vollbild-Ansicht) und Mitspieler (🚩 in der Spielerliste) mit Grund und optionaler Beschreibung. Admins bekommen eine Benachrichtigung und bearbeiten Meldungen unter `/admin` → „Meldungen“ (Foto löschen, Spieler sperren, erledigt). Spieler-Meldungen gehen zusätzlich an die Spielleitung der Runde.
+* **Sperren:** Die Spielleitung kann Spieler entfernen und sperren – sie können der Runde mit diesem Account nicht wieder beitreten. Sperren lassen sich unter „Team“ aufheben.
+* **Fotos laufen ab:** Fotos und Sprachnachrichten beendeter Runden werden nach `PHOTO_RETENTION_DAYS` (Standard 30) Tagen automatisch gelöscht. Galerie und Vitrine sind Kopien und bleiben.
+* **Vorlagen:** Einstellungen als eigenes Regelwerk speichern (bis zu 20) und beim Anlegen neuer Runden laden – in App und Web.
+* **Offene Runden:** Mit „🌍 Unter Offene Runden anzeigen“ wird eine Runde öffentlich auffindbar. Startseite und App zeigen offene Runden, mit Standort nach Entfernung sortiert (bis 50 km). Der Ort der Runde wird auf ~1 km gerundet; mit Spielzone zählt deren Mittelpunkt.
+
 ## Neu in 2.6: Runden für alle
 
 * **Jeder bestätigte Account kann Runden anlegen und leiten** – in der App („🎮 Meine Runden“) oder unter `/admin` (mit Benutzername und Passwort anmelden). Man sieht und steuert nur seine eigenen Runden; Admins sehen und verwalten weiterhin alle.
@@ -154,6 +163,7 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `USER_QUOTA_MB` | Speicherkontingent pro Account für Fotos/Sprachnachrichten der eigenen Runden (Admins unbegrenzt) | 1024 |
 | `MAX_OPEN_GAMES` | So viele nicht beendete Runden darf ein Account gleichzeitig haben | 3 |
 | `MAX_GAME_HOURS` | Laufende Runden enden spätestens nach so vielen Stunden | 24 |
+| `PHOTO_RETENTION_DAYS` | Fotos/Sprachnachrichten beendeter Runden nach so vielen Tagen löschen (0 = nie) | 30 |
 | `TRUST_PROXY` | `private`: X-Forwarded-For nur von Proxys im eigenen Netz, `always`, `never` | `private` |
 
 ## Sicherheit und Datenschutz

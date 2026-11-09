@@ -639,6 +639,11 @@
       if (p.loc && map) btns.push(h('button', { class: 'btn small light', onclick: () => { map.setView([p.loc.lat, p.loc.lng], Math.max(map.getZoom(), 16)); window.scrollTo({ top: 0, behavior: 'smooth' }); const mk = layers.markers.get(p.id); if (mk) mk.openPopup(); } }, 'Auf Karte'));
       if (canCatch && p.role === 'runner') btns.push(h('button', { class: 'btn small light', onclick: () => (p.caught ? setCaught(p.id, false) : confirm(`${p.name} als gefangen markieren?`) && setCaught(p.id, true)) }, p.caught ? 'Wieder frei' : 'Gefangen'));
       if (r === 'admin') btns.push(h('button', { class: 'btn small light', onclick: async () => { if (!confirm(`${p.name} aus dem Spiel entfernen?`)) return; try { await api(`/api/admin/games/${CODE}/kick`, { method: 'POST', token: TOKEN, body: { playerId: p.id } }); } catch (e) { toast(e.message); } } }, 'Entfernen'));
+      if (r === 'admin') btns.push(h('button', { class: 'btn small light', title: 'Entfernen und sperren: kann nicht wieder beitreten', onclick: async () => { if (!confirm(`${p.name} entfernen und für diese Runde sperren?`)) return; try { await api(`/api/admin/games/${CODE}/ban`, { method: 'POST', token: TOKEN, body: { playerId: p.id } }); toast('Gesperrt'); } catch (e) { toast(e.message); } } }, '🚫 Sperren'));
+      if (r !== 'admin' && p.id !== me().id) btns.push(h('button', { class: 'btn small light', title: 'An Admins und Spielleitung melden', onclick: async () => {
+        const rep = MH.askReport(p.name); if (!rep) return;
+        try { await api(`/api/g/${CODE}/report`, { method: 'POST', token: TOKEN, body: { playerId: p.id, ...rep } }); toast('Danke, die Meldung ist raus.'); } catch (e) { toast(e.message); }
+      } }, '🚩'));
       return h('li', { class: p.caught ? 'caught' : '' },
         h('span', { class: `chip ${p.role}` }, roleName(p.role)),
         h('div', { class: 'grow' }, h('div', { class: 'name' }, p.name, p.id === me().id ? ' (du)' : ''), h('div', { class: 'small muted' }, info, p.photoCount ? ` · ${p.photoCount} Fotos` : '')),
@@ -687,7 +692,11 @@
             ph.myReaction = r.reaction; refresh();
           } catch (x) { toast(x.message); }
         },
-      }, e))) : null);
+      }, e))) : null,
+      !own && me().role !== 'admin' ? h('button', { class: 'btn small light', onclick: async () => {
+        const rep = MH.askReport('Foto'); if (!rep) return;
+        try { await api(`/api/g/${CODE}/photo/${ph.id}/report`, { method: 'POST', token: TOKEN, body: rep }); toast('Danke, die Admins schauen sich das an.'); } catch (x) { toast(x.message); }
+      } }, '🚩 Foto melden') : null);
   }
 
   /* --- Uhren und Live-Felder (jede Sekunde) --- */

@@ -510,6 +510,7 @@ private fun PlayersTab(st: GameState, serverNow: Long, showOnMap: (String) -> Un
         }
     }
 
+    var reportPlayer by remember { mutableStateOf<Player?>(null) }
     val sorted = st.players.sortedWith(compareBy({ it.role != "runner" }, { it.name.lowercase() }))
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (st.self.role == "runner" && st.settings.caughtEnabled && running && !st.self.caught) {
@@ -549,6 +550,7 @@ private fun PlayersTab(st: GameState, serverNow: Long, showOnMap: (String) -> Un
                         if (p.outside) Text("außerhalb der Spielzone", style = MaterialTheme.typography.labelSmall, color = C_WARN)
                     }
                     Column(horizontalAlignment = Alignment.End) {
+                        if (p.id != st.self.id && st.self.role != "admin") TextButton(onClick = { reportPlayer = p }) { Text("🚩") }
                         if (p.loc != null || (p.id == st.self.id && fix != null)) {
                             TextButton(onClick = { showOnMap(p.id) }) { Text("Karte") }
                         }
@@ -566,6 +568,10 @@ private fun PlayersTab(st: GameState, serverNow: Long, showOnMap: (String) -> Un
         if (st.players.isEmpty()) item { Text("Noch niemand beigetreten.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 
+    reportPlayer?.let { p ->
+        val s = GameRepository.session.value
+        if (s != null) ReportDialog(p.name, onDismiss = { reportPlayer = null }) { r, n -> Api.reportPlayer(s.code, s.token, p.id, r, n) }
+    }
     if (confirmSelf) {
         AlertDialog(
             onDismissRequest = { confirmSelf = false },
@@ -675,6 +681,7 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
         }
     }
 
+    var reportPhoto by remember { mutableStateOf<String?>(null) }
     open?.let { ph ->
         val s = GameRepository.session.value
         val scope = rememberCoroutineScope()
@@ -682,6 +689,7 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
             FullscreenPhotoViewer(
                 viewerPhotos(st, s.code, s.token, cat), sorted.indexOfFirst { it.id == ph.id }.coerceAtLeast(0),
                 onDismiss = { open = null },
+                onReport = { vp -> reportPhoto = vp.key.substringAfterLast(':') },
                 onReact = { vp, e ->
                     scope.launch {
                         try { GameRepository.react(vp.key.substringAfterLast(':'), e) }
@@ -690,6 +698,10 @@ private fun PhotosTab(st: GameState, serverNow: Long, shooter: PhotoShooter) {
                 },
             )
         }
+    }
+    reportPhoto?.let { id ->
+        val s = GameRepository.session.value
+        if (s != null) ReportDialog("Foto", onDismiss = { reportPhoto = null }) { r, n -> Api.reportPhoto(s.code, s.token, id, r, n) }
     }
 }
 

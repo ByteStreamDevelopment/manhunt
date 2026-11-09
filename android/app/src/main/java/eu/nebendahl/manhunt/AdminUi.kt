@@ -80,6 +80,7 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
     var list by remember { mutableStateOf<AdminList?>(null) }
     val games = list?.games
     var delete by remember { mutableStateOf<AdminGame?>(null) }
+    var team by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
@@ -104,7 +105,7 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
     open?.let { code -> AdminGameScreen(account, code) { open = null; reload++ }; return }
     edit?.let { e ->
         val g = games?.firstOrNull { it.code == e }
-        GameSettingsScreen(account, if (e == "new") null else e, g?.name ?: "Manhunt", g?.settingsJson) { created ->
+        GameSettingsScreen(account, if (e == "new") null else e, g?.name ?: "Manhunt", g?.settingsJson, g?.place) { created ->
             edit = null; reload++
             if (e == "new" && created != null) open = created
         }
@@ -148,6 +149,9 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                         (if (!g.mine && g.owner != null) " · von ${g.owner}" else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
+                                if (g.cohost) Text("👥 Du bist Mit-Spielleitung (Runde von ${g.owner ?: "?"})", style = MaterialTheme.typography.bodySmall, color = C_GREEN)
+                                if (g.publicListed) Text("🌍 Öffentlich" + (g.place?.name?.let { " · $it" } ?: ""), style = MaterialTheme.typography.bodySmall)
+                                if (g.openReports > 0) Text("🚩 ${g.openReports} offene Meldung(en)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                 if (g.youPlay) Text("🎮 Du spielst mit – Karte, Spieler und Fotos sind gesperrt, damit es fair bleibt.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF2BC0F))
                                 if (g.flagged.isNotEmpty()) Text("⚠️ Verdacht: ${g.flagged.joinToString()}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -167,9 +171,10 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                         Toast.makeText(ctx, "Link kopiert", Toast.LENGTH_SHORT).show()
                                     }) { Text("🔗 Link") }
                                 }
-                                if (g.status != "running") Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    if (g.status == "ended" && g.photos > 0) OutlinedButton(onClick = { confirm = g to "purgephotos" }) { Text("🗑️ Fotos löschen") }
-                                    OutlinedButton(onClick = { delete = g }) { Text("Runde löschen", color = C_RED) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(onClick = { team = g.code }) { Text("👥 Team" + if (g.banned.isNotEmpty()) " (${g.banned.size} 🚫)" else "") }
+                                    if (g.status == "ended" && g.photos > 0) OutlinedButton(onClick = { confirm = g to "purgephotos" }) { Text("🗑️ Fotos") }
+                                    if (g.status != "running" && (g.mine || superAdmin)) OutlinedButton(onClick = { delete = g }) { Text("Löschen", color = C_RED) }
                                 }
                             }
                         }
@@ -187,6 +192,11 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
             confirmButton = { TextButton(onClick = { announce = null; act(g, "announce", JSONObject().put("text", text)) }, enabled = text.isNotBlank()) { Text("Senden") } },
             dismissButton = { TextButton(onClick = { announce = null }) { Text("Abbrechen") } },
         )
+    }
+    team?.let { c ->
+        games?.firstOrNull { it.code == c }?.let { g ->
+            TeamDialog(account, g, canEdit = g.mine || superAdmin, onDismiss = { team = null }, onChanged = { reload++ })
+        } ?: run { team = null }
     }
     delete?.let { g ->
         AlertDialog(
@@ -278,6 +288,7 @@ private fun AdminGameScreen(account: Account, code: String, onBack: () -> Unit) 
                 0 -> MapTab(g, serverNow, focus) { focus = null }
                 1 -> AdminPlayers(g, onGive = { p, k -> act("give", JSONObject().put("playerId", p.id).put("ability", k), "Geschenkt") },
                     onKick = { p -> act("kick", JSONObject().put("playerId", p.id)) },
+                    onBan = { p -> act("ban", JSONObject().put("playerId", p.id), "Gesperrt") },
                     onCatch = { p, v ->
                         scope.launch {
                             try { withContext(Dispatchers.IO) { Api.setCaught(code, account.token, p.id, v) }; reload++ }
@@ -299,12 +310,14 @@ private fun AdminPlayers(
     st: GameState,
     onGive: (Player, String) -> Unit,
     onKick: (Player) -> Unit,
+    onBan: (Player) -> Unit,
     onCatch: (Player, Boolean) -> Unit,
     onShow: (Player) -> Unit,
 ) {
     val cat by GameRepository.catalog.collectAsState()
     var giveTo by remember { mutableStateOf<Player?>(null) }
     var kick by remember { mutableStateOf<Player?>(null) }
+    var ban by remember { mutableStateOf<Player?>(null) }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(st.players.sortedWith(compareBy({ it.role }, { it.name.lowercase() })), key = { it.id }) { p ->
             Card(Modifier.fillMaxWidth()) {
@@ -324,6 +337,7 @@ private fun AdminPlayers(
                         if (p.role == "runner" && !p.caught) TextButton(onClick = { onCatch(p, true) }) { Text("Fangen") }
                         if (p.converted || p.caught) TextButton(onClick = { onCatch(p, false) }) { Text("Befreien") }
                         TextButton(onClick = { kick = p }) { Text("Entfernen", color = C_RED) }
+                        TextButton(onClick = { ban = p }) { Text("🚫", color = C_RED) }
                     }
                 }
             }
@@ -342,6 +356,15 @@ private fun AdminPlayers(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { giveTo = null }) { Text("Abbrechen") } },
+        )
+    }
+    ban?.let { p ->
+        AlertDialog(
+            onDismissRequest = { ban = null },
+            title = { Text("${p.name} sperren?") },
+            text = { Text("${p.name} wird entfernt und kann dieser Runde nicht wieder beitreten. Die Sperre lässt sich unter „👥 Team“ aufheben.") },
+            confirmButton = { TextButton(onClick = { ban = null; onBan(p) }) { Text("Sperren", color = C_RED) } },
+            dismissButton = { TextButton(onClick = { ban = null }) { Text("Abbrechen") } },
         )
     }
     kick?.let { p ->

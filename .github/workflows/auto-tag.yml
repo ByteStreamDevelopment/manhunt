@@ -6,7 +6,7 @@
 # n zählt automatisch hoch. Für einen Sprung (z. B. 2.4) einfach versionName dort ändern.
 # Kein Tag: "[skip tag]" in die Commit-Nachricht schreiben.
 #
-# Optional: Secret FORGEJO_TOKEN (Forgejo-Token mit Schreibrecht auf Manhunt/manhunt) -> Forgejo
+# Optional: Secret FORGEJO_TOKEN (Forgejo-Token mit Schreibrecht auf Mrcoolgamer-Inc/manhunt) -> Forgejo
 # synchronisiert sofort statt erst beim nächsten Spiegel-Intervall (dort derzeit 8 Stunden).
 name: Auto-Tag
 
@@ -63,6 +63,6 @@ jobs:
             exit 0
           fi
           curl -fsS -X POST -H "Authorization: token $FORGEJO_TOKEN" \
-            https://git.nebendahl.eu/api/v1/repos/Manhunt/manhunt/mirror-sync \
+            https://git.nebendahl.eu/api/v1/repos/Mrcoolgamer-Inc/manhunt/mirror-sync \
             && echo "Forgejo-Synchronisation angestoßen." \
             || echo "::warning::Forgejo-Synchronisation fehlgeschlagen (Token/Rechte prüfen)."

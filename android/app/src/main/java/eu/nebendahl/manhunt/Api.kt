@@ -248,13 +248,41 @@ object Api {
     /** Standardwerte aller Einstellungen (inkl. Fähigkeiten/Quests) und Katalog. */
     fun adminCatalog(adminToken: String): JSONObject = json(get("/api/admin/catalog", adminToken))
 
-    fun adminCreate(adminToken: String, name: String, settings: JSONObject): String =
-        json(post("/api/admin/games", adminToken, JSONObject().put("name", name).put("settings", settings))).getString("code")
+    /** place: ungefährer Ort für „Offene Runden“ ({lat,lng,name}), JSONObject.NULL = entfernen, null = nicht ändern */
+    fun adminCreate(adminToken: String, name: String, settings: JSONObject, place: Any? = null): String =
+        json(post("/api/admin/games", adminToken, JSONObject().put("name", name).put("settings", settings).apply { if (place != null) put("place", place) })).getString("code")
 
-    fun adminUpdate(adminToken: String, code: String, name: String, settings: JSONObject) {
+    fun adminUpdate(adminToken: String, code: String, name: String, settings: JSONObject, place: Any? = null) {
+        val body = JSONObject().put("name", name).put("settings", settings).apply { if (place != null) put("place", place) }
         val req = Request.Builder().url(url("/api/admin/games/$code")).header("x-token", adminToken)
-            .patch(JSONObject().put("name", name).put("settings", settings).toString().toRequestBody(JSON)).build()
+            .patch(body.toString().toRequestBody(JSON)).build()
         json(req)
+    }
+
+    /* ---------------- Melden, offene Runden, Vorlagen ---------------- */
+
+    fun reportPhoto(code: String, token: String, photoId: String, reason: String, note: String) {
+        json(post("/api/g/$code/photo/$photoId/report", token, JSONObject().put("reason", reason).put("note", note)))
+    }
+
+    fun reportPlayer(code: String, token: String, playerId: String, reason: String, note: String) {
+        json(post("/api/g/$code/report", token, JSONObject().put("playerId", playerId).put("reason", reason).put("note", note)))
+    }
+
+    fun publicGames(accountToken: String, lat: Double?, lng: Double?): List<PublicGame> {
+        val q = if (lat != null && lng != null) String.format(java.util.Locale.US, "?lat=%.3f&lng=%.3f", lat, lng) else ""
+        return parsePublicGames(json(get("/api/public-games$q", accountToken)))
+    }
+
+    fun templates(accountToken: String): List<GameTemplate> = parseTemplates(json(get("/api/me/templates", accountToken)))
+
+    fun template(accountToken: String, id: String): JSONObject = json(get("/api/me/templates/$id", accountToken)).getJSONObject("settings")
+
+    fun saveTemplate(accountToken: String, name: String, settings: JSONObject): List<GameTemplate> =
+        parseTemplates(json(post("/api/me/templates", accountToken, JSONObject().put("name", name).put("settings", settings))))
+
+    fun deleteTemplate(accountToken: String, id: String) {
+        json(Request.Builder().url(url("/api/me/templates/$id")).header("x-token", accountToken).delete().build())
     }
 
     fun adminAction(adminToken: String, code: String, action: String, body: JSONObject = JSONObject()) {

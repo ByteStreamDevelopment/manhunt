@@ -16,7 +16,7 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
-/** Ein Release auf Forgejo (https://git.nebendahl.eu/Manhunt/manhunt/releases). */
+/** Ein Release auf Forgejo (https://git.nebendahl.eu/Mrcoolgamer-Inc/manhunt/releases). */
 data class AppRelease(val version: String, val tag: String, val notes: String, val apkUrl: String?, val apkSize: Long, val pageUrl: String)
 
 /**

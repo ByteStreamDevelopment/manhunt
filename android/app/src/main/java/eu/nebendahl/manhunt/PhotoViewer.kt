@@ -113,7 +113,11 @@ data class ViewerPhoto(
  * Unten Emoji-Reaktionen wie bei WhatsApp.
  */
 @Composable
-fun FullscreenPhotoViewer(photos: List<ViewerPhoto>, start: Int, onDismiss: () -> Unit, onReact: (ViewerPhoto, String) -> Unit = { _, _ -> }) {
+fun FullscreenPhotoViewer(
+    photos: List<ViewerPhoto>, start: Int, onDismiss: () -> Unit, onReact: (ViewerPhoto, String) -> Unit = { _, _ -> },
+    /** Melden-Knopf (nur bei fremden Fotos, wenn gesetzt) */
+    onReport: ((ViewerPhoto) -> Unit)? = null,
+) {
     if (photos.isEmpty()) return
     BackHandler(onBack = onDismiss)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -130,6 +134,7 @@ fun FullscreenPhotoViewer(photos: List<ViewerPhoto>, start: Int, onDismiss: () -
                         Text(cur.title, color = Color.White, fontWeight = FontWeight.Bold)
                         Text("${cur.subtitle} · ${pager.currentPage + 1}/${photos.size}", color = Color(0xFFDDDDDD), style = MaterialTheme.typography.bodySmall)
                     }
+                    if (onReport != null && cur.canReact) TextButton(onClick = { onReport(cur) }) { Text("🚩", fontSize = 20.sp) }
                     TextButton(onClick = onDismiss) { Text("✕", color = Color.White, fontSize = 22.sp) }
                 }
             }

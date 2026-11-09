@@ -22,7 +22,7 @@ android {
         // Server-Adresse der Manhunt-Website
         buildConfigField("String", "BASE_URL", "\"https://manhunt.nebendahl.eu\"")
         // Hier fragt die App beim Öffnen nach einer neueren Version (Forgejo-Releases, öffentlich)
-        buildConfigField("String", "UPDATE_URL", "\"https://git.nebendahl.eu/api/v1/repos/Manhunt/manhunt/releases/latest\"")
+        buildConfigField("String", "UPDATE_URL", "\"https://git.nebendahl.eu/api/v1/repos/Mrcoolgamer-Inc/manhunt/releases/latest\"")
     }
 
     // Fester Signierschlüssel, damit neue APKs über alte installiert werden können.
