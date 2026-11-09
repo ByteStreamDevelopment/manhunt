@@ -74,9 +74,10 @@ fun rememberPhotoShooter(): PhotoShooter {
                 try {
                     val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
                     val bytes = withContext(Dispatchers.Default) { prepareJpeg(ctx, uri) }
-                    GameRepository.uploadPhoto(bytes, quest)
+                    val warning = GameRepository.uploadPhoto(bytes, quest)
                     if (quest == null) Notif.cancelPhotoAlarm(ctx)
-                    Toast.makeText(ctx, if (quest != null) "Quest-Foto hochgeladen" else "Foto hochgeladen", Toast.LENGTH_SHORT).show()
+                    if (warning != null) Toast.makeText(ctx, warning, Toast.LENGTH_LONG).show()
+                    else Toast.makeText(ctx, if (quest != null) "Quest-Foto hochgeladen" else "Foto hochgeladen", Toast.LENGTH_SHORT).show()
                 } catch (e: ApiException) {
                     Toast.makeText(ctx, "Foto-Upload fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
@@ -140,10 +141,15 @@ fun ActionsTab(st: GameState, serverNow: Long, shooter: PhotoShooter, showOnMap:
     }
 
     if (!st.isPlayer()) {
-        Text("Als Zuschauer hast du keine Fähigkeiten und Quests – schau auf der Karte zu!", Modifier.padding(16.dp))
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            HostCard(st)
+            Text("Als Zuschauer hast du keine Fähigkeiten und Quests – schau auf der Karte zu!", Modifier.padding(4.dp))
+        }
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Eigene Runde: starten/beenden direkt aus dem Spiel (Spielleitung spielt mit)
+        item { HostCard(st) }
         // Aktive Effekte
         if (st.effects.isNotEmpty()) {
             item {
@@ -359,4 +365,51 @@ fun FreezeOverlay(st: GameState, serverNow: Long) {
             }
         }
     }
+}
+
+/**
+ * Leitet man diese Runde selbst (und spielt mit), kann man sie hier starten, beenden und den Link teilen.
+ * Rundumsicht & Co. bleiben gesperrt, damit es fair ist.
+ */
+@Composable
+private fun HostCard(st: GameState) {
+    val account = GameRepository.account.collectAsState().value ?: return
+    val mine = st.game.owner?.equals(account.username, ignoreCase = true) ?: account.isAdmin
+    if (!mine || st.game.status == "ended") return
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var confirmEnd by remember { mutableStateOf(false) }
+    fun act(action: String) {
+        scope.launch {
+            try { withContext(Dispatchers.IO) { Api.adminAction(account.token, st.game.code, action) } }
+            catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("🎮 Du leitest diese Runde", fontWeight = FontWeight.Bold)
+            Text(
+                if (st.game.status == "lobby") "Warte, bis alle beigetreten sind (${st.players.count { it.role == "runner" }} Runner, ${st.players.count { it.role == "hunter" }} Hunter), dann starte."
+                else "Weil du mitspielst, hast du keine Rundumsicht – fair für alle.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (st.game.status == "lobby") Button(onClick = { act("start") }) { Text("▶️ Starten") }
+                else OutlinedButton(onClick = { confirmEnd = true }) { Text("⏹ Beenden") }
+                OutlinedButton(onClick = {
+                    val link = BuildConfig.BASE_URL + "/g/" + st.game.code
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, "Spiel mit bei Manhunt: ${st.game.name} – Code ${st.game.code}\n$link")
+                    ctx.startActivity(android.content.Intent.createChooser(send, "Einladen"))
+                }) { Text("🔗 Einladen") }
+            }
+        }
+    }
+    if (confirmEnd) AlertDialog(
+        onDismissRequest = { confirmEnd = false },
+        title = { Text("Runde beenden?") },
+        text = { Text("Die Runde endet für alle sofort.") },
+        confirmButton = { TextButton(onClick = { confirmEnd = false; act("end") }) { Text("Beenden") } },
+        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Abbrechen") } },
+    )
 }

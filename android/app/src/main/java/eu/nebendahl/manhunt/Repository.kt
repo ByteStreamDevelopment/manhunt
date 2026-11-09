@@ -355,12 +355,14 @@ object GameRepository {
         withContext(Dispatchers.IO) { Api.setCaught(s.code, s.token, playerId, caught); runCatching { refresh(s) } }
     }
 
-    suspend fun uploadPhoto(jpeg: ByteArray, questId: String? = null) {
-        val s = session.value ?: return
-        withContext(Dispatchers.IO) {
-            Api.uploadPhoto(s.code, s.token, jpeg, questId)
+    /** null = gespeichert, sonst Warnung vom Server */
+    suspend fun uploadPhoto(jpeg: ByteArray, questId: String? = null): String? {
+        val s = session.value ?: return null
+        return withContext(Dispatchers.IO) {
+            val warning = Api.uploadPhoto(s.code, s.token, jpeg, questId)
             if (s.role == "runner") localLastPhoto.value = System.currentTimeMillis() + clockOffset
             runCatching { refresh(s) }
+            warning
         }
     }
 

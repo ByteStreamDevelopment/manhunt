@@ -77,7 +77,9 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var games by remember { mutableStateOf<List<AdminGame>?>(null) }
+    var list by remember { mutableStateOf<AdminList?>(null) }
+    val games = list?.games
+    var delete by remember { mutableStateOf<AdminGame?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
@@ -86,7 +88,7 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
 
     LaunchedEffect(reload, open) {
         while (open == null) {
-            try { games = withContext(Dispatchers.IO) { Api.adminGames(account.token) }; error = null } catch (e: ApiException) { error = e.message }
+            try { list = withContext(Dispatchers.IO) { Api.adminGames(account.token) }; error = null } catch (e: ApiException) { error = e.message }
             delay(10_000)
         }
     }
@@ -109,14 +111,28 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
         return
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("👑 Spielleitung") }, navigationIcon = { TextButton(onClick = onBack) { Text("‹ Zurück") } }) }) { pad ->
+    fun remove(g: AdminGame) {
+        scope.launch {
+            try { withContext(Dispatchers.IO) { Api.adminDelete(account.token, g.code) }; Toast.makeText(ctx, "Runde gelöscht", Toast.LENGTH_SHORT).show(); reload++ }
+            catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+    val superAdmin = list?.superAdmin ?: account.isAdmin
+    Scaffold(topBar = { TopAppBar(title = { Text(if (superAdmin) "👑 Spielleitung" else "🎮 Meine Runden") }, navigationIcon = { TextButton(onClick = onBack) { Text("‹ Zurück") } }) }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when {
                 error != null -> Text(error!!, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
                 games == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 else -> LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item { Button(onClick = { edit = "new" }, modifier = Modifier.fillMaxWidth()) { Text("➕ Neues Spiel anlegen") } }
-                    if (games!!.isEmpty()) item { Text("Noch keine Spiele.") }
+                    list?.storage?.takeIf { !it.unlimited }?.let { st -> item { StorageCard(st, games!!.count { it.status != "ended" }, list!!.maxOpenGames) } }
+                    item { Button(onClick = { edit = "new" }, modifier = Modifier.fillMaxWidth()) { Text("➕ Neue Runde anlegen") } }
+                    if (games!!.isEmpty()) item {
+                        Text(
+                            "Noch keine Runden. Leg eine an, stell die Regeln ein und schick deinen Freunden den Link oder Code – " +
+                                "du kannst selbst mitspielen oder nur leiten.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     items(games!!, key = { it.code }) { g ->
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -128,7 +144,8 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                     )
                                 }
                                 Text(
-                                    "${g.runners} Runner · ${g.hunters} Hunter · ${g.caught} gefangen · ${g.spectators} Zuschauer · ${g.photos} Fotos",
+                                    "${g.runners} Runner · ${g.hunters} Hunter · ${g.caught} gefangen · ${g.spectators} Zuschauer · ${g.photos} Fotos (${fmtBytes(g.bytes)})" +
+                                        (if (!g.mine && g.owner != null) " · von ${g.owner}" else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 if (g.youPlay) Text("🎮 Du spielst mit – Karte, Spieler und Fotos sind gesperrt, damit es fair bleibt.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF2BC0F))
@@ -150,6 +167,10 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
                                         Toast.makeText(ctx, "Link kopiert", Toast.LENGTH_SHORT).show()
                                     }) { Text("🔗 Link") }
                                 }
+                                if (g.status != "running") Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (g.status == "ended" && g.photos > 0) OutlinedButton(onClick = { confirm = g to "purgephotos" }) { Text("🗑️ Fotos löschen") }
+                                    OutlinedButton(onClick = { delete = g }) { Text("Runde löschen", color = C_RED) }
+                                }
                             }
                         }
                     }
@@ -167,11 +188,28 @@ fun AdminScreen(account: Account, onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { announce = null }) { Text("Abbrechen") } },
         )
     }
+    delete?.let { g ->
+        AlertDialog(
+            onDismissRequest = { delete = null },
+            title = { Text("„${g.name}“ löschen?") },
+            text = { Text("Die Runde wird mit allen Fotos, Positionen und Nachrichten endgültig gelöscht. Das gibt ${fmtBytes(g.bytes)} Speicher frei.") },
+            confirmButton = { TextButton(onClick = { delete = null; remove(g) }) { Text("Löschen", color = C_RED) } },
+            dismissButton = { TextButton(onClick = { delete = null }) { Text("Abbrechen") } },
+        )
+    }
     confirm?.let { (g, action) ->
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(if (action == "end") "Spiel beenden?" else "Spiel zurücksetzen?") },
-            text = { Text(if (action == "end") "Das Spiel endet für alle sofort." else "Alle Positionen, Fotos, Fähigkeiten und Nachrichten werden gelöscht.") },
+            title = { Text(when (action) { "end" -> "Spiel beenden?"; "purgephotos" -> "Fotos löschen?"; else -> "Spiel zurücksetzen?" }) },
+            text = {
+                Text(
+                    when (action) {
+                        "end" -> "Das Spiel endet für alle sofort."
+                        "purgephotos" -> "Alle ${g.photos} Fotos und Sprachnachrichten dieser Runde werden gelöscht (${fmtBytes(g.bytes)}). Ergebnis, Karte und Verlauf bleiben."
+                        else -> "Alle Positionen, Fotos, Fähigkeiten und Nachrichten werden gelöscht."
+                    },
+                )
+            },
             confirmButton = { TextButton(onClick = { confirm = null; act(g, action) }) { Text("Ja") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Abbrechen") } },
         )
@@ -247,7 +285,7 @@ private fun AdminGameScreen(account: Account, code: String, onBack: () -> Unit) 
                         }
                     },
                     onShow = { p -> focus = MapFocus(playerId = p.id); tab = 0 })
-                2 -> AdminPhotos(g, account.token,
+                2 -> AdminPhotos(g, account.token, canFeature = g.canFeature,
                     onFeature = { ph, caption -> act("feature", JSONObject().put("photoId", ph.id).put("caption", caption), "In der Galerie") },
                     onReject = { ph -> act("rejectphoto", JSONObject().put("photoId", ph.id), "Abgelehnt") })
                 else -> ChatTab(g)
@@ -317,7 +355,7 @@ private fun AdminPlayers(
 }
 
 @Composable
-private fun AdminPhotos(st: GameState, token: String, onFeature: (PhotoRef, String) -> Unit, onReject: (PhotoRef) -> Unit) {
+private fun AdminPhotos(st: GameState, token: String, canFeature: Boolean, onFeature: (PhotoRef, String) -> Unit, onReject: (PhotoRef) -> Unit) {
     val names = st.players.associate { it.id to it.name }
     val cat by GameRepository.catalog.collectAsState()
     var open by remember { mutableStateOf<PhotoRef?>(null) }
@@ -356,13 +394,39 @@ private fun AdminPhotos(st: GameState, token: String, onFeature: (PhotoRef, Stri
                     val bmp = rememberAdminPhoto(st.game.code, token, ph.id)
                     if (bmp != null) Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
                     Text("${names[ph.pid] ?: "?"} · ${clock(ph.ts)} Uhr" + (ph.quest?.let { q -> " · Quest: " + (ph.questTitle ?: cat?.quest(q)?.title ?: q) } ?: ""))
-                    OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("Bildunterschrift (optional)") }, modifier = Modifier.fillMaxWidth())
+                    if (canFeature) OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("Bildunterschrift (optional)") }, modifier = Modifier.fillMaxWidth())
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(onClick = { open = null; onFeature(ph, caption) }) { Text("⭐ Galerie") }
+                        if (canFeature) Button(onClick = { open = null; onFeature(ph, caption) }) { Text("⭐ Galerie") }
                         OutlinedButton(onClick = { open = null; onReject(ph) }) { Text(if (ph.quest != null) "❌ Quest ablehnen" else "🗑️ Entfernen") }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Speicherkontingent der eigenen Runden */
+@Composable
+private fun StorageCard(st: Storage, open: Int, maxOpen: Int) {
+    val full = st.percent >= 95
+    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(
+        containerColor = if (full) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+    )) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("💾 Dein Speicher", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("${fmtBytes(st.used)} von ${fmtBytes(st.quota ?: 0)}")
+            }
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { st.percent / 100f }, modifier = Modifier.fillMaxWidth(),
+                color = if (st.percent >= 80) C_RED else MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                (if (full) "Voll! Neue Fotos werden nicht mehr gespeichert. " else "") +
+                    "Fotos und Sprachnachrichten deiner Runden zählen dazu. Platz schaffst du mit „Fotos löschen“ (Ergebnis bleibt) oder „Runde löschen“. " +
+                    "Offene Runden: $open von $maxOpen.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

@@ -79,6 +79,8 @@ data class GameInfo(
     val startedAt: Long?,
     val endedAt: Long?,
     val releaseAt: Long?,
+    /** Wer die Runde angelegt hat (null = Admin/alt) */
+    val owner: String? = null,
 )
 
 data class AbilityCount(val key: String, val count: Int)
@@ -138,6 +140,8 @@ data class GameState(
     val effects: List<Effect> = emptyList(),
     val pickups: List<Pickup> = emptyList(),
     val chat: List<ChatMsg> = emptyList(),
+    /** Spielleitung darf Fotos in die Galerie übernehmen (nur Admins) */
+    val canFeature: Boolean = false,
 )
 
 data class LobbyInfo(
@@ -210,7 +214,33 @@ data class AdminGame(
     val settingsJson: String = "{}",
     /** Die Spielleitung spielt selbst mit -> keine Vorteile (Karte, Spieler, Fotos gesperrt) */
     val youPlay: Boolean = false,
+    /** Wer die Runde angelegt hat (Admins sehen das bei fremden Runden) */
+    val owner: String? = null,
+    /** Belegter Speicher (Fotos + Sprachnachrichten) in Bytes */
+    val bytes: Long = 0,
+    /** Eigene Runde? */
+    val mine: Boolean = true,
 )
+
+/** Speicherkontingent: quota = null bedeutet unbegrenzt (Admins) */
+data class Storage(val used: Long, val quota: Long?) {
+    val unlimited get() = quota == null
+    val percent get() = if (quota == null || quota <= 0) 0 else ((used * 100) / quota).toInt().coerceIn(0, 100)
+}
+data class AdminList(val games: List<AdminGame>, val storage: Storage, val superAdmin: Boolean, val maxOpenGames: Int)
+
+fun parseStorage(j: JSONObject?): Storage =
+    if (j == null) Storage(0, null) else Storage(j.optLong("used"), if (j.optBoolean("unlimited") || j.isNull("quota")) null else j.optLong("quota"))
+
+fun parseAdminList(j: JSONObject): AdminList =
+    AdminList(parseAdminGames(j), parseStorage(j.optJSONObject("storage")), j.optBoolean("superAdmin", true), j.optInt("maxOpenGames", 3))
+
+/** 1536000 -> "1,5 MB" */
+fun fmtBytes(b: Long): String = when {
+    b >= 1024L * 1024 * 1024 -> String.format(java.util.Locale.GERMANY, "%.2f GB", b / (1024.0 * 1024 * 1024))
+    b >= 1024L * 1024 -> String.format(java.util.Locale.GERMANY, "%.1f MB", b / (1024.0 * 1024))
+    else -> "${b / 1024} KB"
+}
 
 fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").objects().map { g ->
     AdminGame(
@@ -219,6 +249,7 @@ fun parseAdminGames(j: JSONObject): List<AdminGame> = j.getJSONArray("games").ob
         g.optJSONArray("flagged")?.objects()?.map { it.optString("name") } ?: emptyList(),
         g.optJSONObject("settings")?.toString() ?: "{}",
         g.optBoolean("youPlay"),
+        g.strOrNull("owner"), g.optLong("bytes"), g.optBoolean("mine", true),
     )
 }
 
@@ -409,8 +440,9 @@ fun parseState(j: JSONObject): GameState {
         now = j.getLong("now"),
         game = GameInfo(
             g.getString("code"), g.getString("name"), g.getString("status"),
-            g.longOrNull("startedAt"), g.longOrNull("endedAt"), g.longOrNull("releaseAt"),
+            g.longOrNull("startedAt"), g.longOrNull("endedAt"), g.longOrNull("releaseAt"), g.strOrNull("owner"),
         ),
+        canFeature = j.optBoolean("canFeature"),
         settings = Settings(
             locationIntervalSec = s.optInt("locationIntervalSec", 120),
             headStartMin = s.optInt("headStartMin", 0),

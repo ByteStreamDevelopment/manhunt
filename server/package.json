@@ -1,11 +1,11 @@
 {
   "name": "manhunt",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Echtes Manhunt-Spiel: Runner teilen ihren Standort und Fotos, Hunter jagen sie.",
   "main": "server.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
-    "test": "node --disable-warning=ExperimentalWarning test/features.mjs && node --disable-warning=ExperimentalWarning test/e2e.mjs"
+    "test": "node --disable-warning=ExperimentalWarning test/features.mjs && node --disable-warning=ExperimentalWarning test/e2e.mjs && node --disable-warning=ExperimentalWarning test/hosting.mjs"
   },
   "engines": {
     "node": ">=22.13"

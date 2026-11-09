@@ -356,6 +356,8 @@ fun HomeScreen(
             Text(it, color = MaterialTheme.colorScheme.error)
             if (it.contains("App-Einstellungen") || it.contains("GENAUEN")) OutlinedButton(onClick = { openAppSettings(ctx) }) { Text("App-Einstellungen öffnen") }
         }
+        // Jeder kann eigene Runden anlegen und leiten
+        if (info == null) OutlinedButton(onClick = openAdmin, modifier = Modifier.fillMaxWidth()) { Text("➕ Eigene Runde erstellen") }
         // Weitere Bereiche als Kacheln
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
         val requests = friends?.incoming?.size ?: 0
@@ -363,7 +365,7 @@ fun HomeScreen(
             add(Triple("🏆", "Bestenliste", openLeaderboard))
             add(Triple("⭐", "Galerie", openGallery))
             add(Triple("👤", "Profil & Freunde" + if (requests > 0) " ($requests)" else "", openProfile))
-            if (account.isAdmin) add(Triple("👑", "Spielleitung", openAdmin)) else add(Triple("⚙️", "Einstellungen", openSettings))
+            add(Triple(if (account.isAdmin) "👑" else "🎮", if (account.isAdmin) "Spielleitung" else "Meine Runden", openAdmin))
         }
         tiles.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

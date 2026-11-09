@@ -6,7 +6,7 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 
 ## Ablauf
 
-1. Du öffnest `/admin`, meldest dich mit dem Admin-Passwort an und legst ein Spiel an. Dabei schaltest du die Features ein oder aus.
+1. Du öffnest `/admin` (oder „Meine Runden“ in der App), meldest dich mit deinem Account an und legst ein Spiel an. Dabei schaltest du die Features ein oder aus.
 2. Du verschickst den Einladungslink oder den 5-stelligen Code.
 3. Jeder trägt Namen und Rolle ein (Runner oder Hunter).
 4. Sobald du auf **Spiel starten** drückst, teilen Runner ihren Standort im eingestellten Intervall. Nach jeweils X Minuten (Standard 15) schlagen die Runner-Handys Alarm, bis ein Foto hochgeladen ist.
@@ -28,6 +28,15 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Fähigkeiten:** Runner: Freeze (Hunter eingefroren), Tarnkappe, Köder (falsche Position), Nebelwand, Fotojoker, Befreiung. Hunter: Radar (Live-Standort aller Runner), Peilung, Fotobefehl, Spurenleser, Eisbrecher. Beide: Schild. Pro Spiel einstellbar: erlaubt, Anzahl zum Start, im Spiel erhältlich, Dauer.
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
+
+## Neu in 2.6: Runden für alle
+
+* **Jeder bestätigte Account kann Runden anlegen und leiten** – in der App („🎮 Meine Runden“) oder unter `/admin` (mit Benutzername und Passwort anmelden). Man sieht und steuert nur seine eigenen Runden; Admins sehen und verwalten weiterhin alle.
+* **Speicherkontingent:** Fotos und Sprachnachrichten der eigenen Runden zählen gegen ein Kontingent von **1 GB** pro Account (`USER_QUOTA_MB`). Bei 80 % kommt eine Warnung. Ist es voll, zählen Fotos im Spiel weiter (keine Live-Strafe, Quest erfüllt), werden aber nicht mehr gespeichert, und neue Runden lassen sich erst nach dem Aufräumen anlegen. Admins haben kein Limit und können pro Account ein eigenes Kontingent setzen (`/admin` → Accounts → „Kontingent“); unter „Speicher“ steht, wer wie viel belegt.
+* **Aufräumen:** Eigene Runden löschen (nicht während sie laufen) oder nur deren **Fotos löschen** – Ergebnis, Karte und Verlauf bleiben. Admins können jede Runde löschen.
+* **Grenzen gegen Missbrauch:** höchstens 3 offene Runden gleichzeitig pro Account (`MAX_OPEN_GAMES`), höchstens 20 neue Runden pro Stunde, laufende Runden enden spätestens nach 24 Stunden (`MAX_GAME_HOURS`).
+* Galerie, Accounts und „Alle Fotos löschen“ bleiben den Admins vorbehalten. Für Spielleiter, die selbst mitspielen, gelten dieselben Fairness-Regeln wie bisher für Admins; sie können die Runde aber direkt im Spiel starten und beenden.
+* Wird ein Konto gelöscht, werden seine offenen Runden beendet bzw. gelöscht und die Fotos seiner Runden entfernt; beendete Runden bleiben für die Mitspieler im Verlauf.
 
 ## Neu in 2.5
 
@@ -142,12 +151,15 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `ANDROID_CERT_SHA256` | Fingerabdruck der App für App-Links | – |
 | `PUBLIC_URL` | Öffentliche Adresse (für Push-Absenderkennung) | `https://manhunt.nebendahl.eu` |
 | `RETENTION_DAYS` | Standortdaten beendeter Spiele nach so vielen Tagen löschen (0 = nie) | 30 |
+| `USER_QUOTA_MB` | Speicherkontingent pro Account für Fotos/Sprachnachrichten der eigenen Runden (Admins unbegrenzt) | 1024 |
+| `MAX_OPEN_GAMES` | So viele nicht beendete Runden darf ein Account gleichzeitig haben | 3 |
+| `MAX_GAME_HOURS` | Laufende Runden enden spätestens nach so vielen Stunden | 24 |
 | `TRUST_PROXY` | `private`: X-Forwarded-For nur von Proxys im eigenen Netz, `always`, `never` | `private` |
 
 ## Sicherheit und Datenschutz
 
 * Mitspielen erfordert einen bestätigten Account. Passwörter werden mit scrypt gehasht, Bestätigungscodes laufen nach 30 Minuten ab und sind auf 5 Versuche begrenzt. Wer den Spielcode kennt und einen Account hat, kann beitreten – verschicke den Code also nur an Mitspieler.
-* Nur die Spielleitung (Passwort) kann Spiele anlegen, steuern und löschen. Falsche Passwörter werden gebremst.
+* Jeder bestätigte Account kann eigene Runden anlegen, steuern und löschen; Admins (bzw. das Server-Passwort) alle. Falsche Passwörter werden gebremst.
 * Runner sehen vor dem Beitritt, was geteilt wird. Nach dem Spiel kannst du das Spiel in `/admin` mit **Löschen** entfernen, dann verschwinden Positionen und Fotos vom Server.
 * Auch bei aktivierter Verwischung sieht die Spielleitung immer die exakten Positionen.
 
