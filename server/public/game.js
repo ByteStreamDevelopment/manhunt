@@ -325,9 +325,11 @@
     const q = photoQuest; photoQuest = null;
     try {
       const blob = await shrink(file);
-      await api(`/api/g/${CODE}/photo${q ? `?quest=${q}` : ''}`, { method: 'POST', token: TOKEN, body: blob, contentType: 'image/jpeg' });
+      const r = await api(`/api/g/${CODE}/photo${q ? `?quest=${q}` : ''}`, { method: 'POST', token: TOKEN, body: blob, contentType: 'image/jpeg' });
       if (me().role === 'runner') localLastPhoto = nowMs();
-      toast(q ? 'Quest-Foto hochgeladen' : 'Foto hochgeladen'); refresh();
+      if (r && r.stored === false) toast(r.warning || 'Foto gezählt, aber nicht gespeichert', 6000);
+      else toast(q ? 'Quest-Foto hochgeladen' : 'Foto hochgeladen');
+      refresh();
     } catch (e) { toast(`Foto-Upload fehlgeschlagen: ${e.message}`, 6000); }
     finally { uploading = false; renderLage(); }
   }

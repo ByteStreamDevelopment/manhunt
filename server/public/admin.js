@@ -3,7 +3,23 @@
   const { $, h, api, toast, clock } = MH;
   const KEY = 'manhunt:admin';
   let token = localStorage.getItem(KEY);
-  let CAT = null; // Katalog: abilities, quests, defaults
+  let CAT = null; // Katalog: abilities, quests, defaults, superAdmin, storage
+  const isSuper = () => !!(CAT && CAT.superAdmin);
+  const fmtBytes = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+  /** Speicherkontingent anzeigen (normale Accounts) */
+  function renderQuota(st, games) {
+    const box = $('#quota');
+    if (!st || st.unlimited) { box.hidden = true; return; }
+    const pct = Math.min(100, Math.round((st.used / st.quota) * 100));
+    const open = (games || []).filter((g) => g.status !== 'ended').length;
+    box.hidden = false;
+    box.className = `card stack${pct >= 95 ? ' danger' : ''}`;
+    box.replaceChildren(
+      h('div', { class: 'row between' }, h('b', {}, '💾 Dein Speicher'), h('span', {}, `${fmtBytes(st.used)} von ${fmtBytes(st.quota)} (${pct} %)`)),
+      h('div', { class: 'bar-progress' }, h('i', { style: `width:${pct}%` })),
+      h('p', { class: 'small muted' }, `Fotos und Sprachnachrichten deiner Runden zählen dazu. Platz schaffst du mit „Fotos löschen“ (Ergebnis bleibt) oder „Löschen“. Offene Runden: ${open} von ${CAT.maxOpenGames}.`),
+    );
+  }
 
   /* Alle Einstellungen. Jedes Feature lässt sich hier an- oder ausschalten. */
   const FIELDS = [
@@ -237,6 +253,7 @@
       }
       if (b.dataset.tab === 'accounts') loadAccounts();
       if (b.dataset.tab === 'gallery') loadGallery();
+      if (b.dataset.tab === 'storage') loadStorage();
     });
   }
 
@@ -258,7 +275,7 @@
       const names = Object.fromEntries(st.players.map((p) => [p.id, p.name]));
       const list = [...st.photos].sort((a, b) => b.ts - a.ts);
       box.replaceChildren(
-        h('div', { class: 'row between' }, h('h3', {}, `Fotos (${list.length}) – mit ⭐ in die Galerie übernehmen`),
+        h('div', { class: 'row between' }, h('h3', {}, isSuper() ? `Fotos (${list.length}) – mit ⭐ in die Galerie übernehmen` : `Fotos (${list.length})`),
           list.length ? h('a', { class: 'btn small light', href: `/api/g/${g.code}/photos.zip?t=${encodeURIComponent(token)}` }, '⬇️ Alle als ZIP') : null),
         list.length ? h('div', { class: 'photos' }, list.map((ph) => {
           const src = `/api/g/${g.code}/photo/${ph.id}?t=${encodeURIComponent(token)}`;
@@ -272,7 +289,7 @@
               if (await act(g.code, 'rejectphoto', { photoId: ph.id })) { toast('Foto abgelehnt'); }
             } }, ph.quest ? '❌ Ablehnen' : '🗑️'),
             ph.featured ? h('span', { class: 'chip gold' }, '⭐ in Galerie')
-              : h('button', { class: 'btn small gold', onclick: async () => {
+              : !isSuper() ? null : h('button', { class: 'btn small gold', onclick: async () => {
                 const caption = prompt('Bildunterschrift (optional):', '') ?? null;
                 if (caption === null) return;
                 if (await act(g.code, 'feature', { photoId: ph.id, caption })) toast('In die Galerie übernommen');
@@ -311,12 +328,15 @@
   function gameCard(g) {
     const link = `${location.origin}/g/${g.code}`;
     const card = h('article', { class: 'card gamecard stack' });
-    card.append(
+    // DOM-append würde null/false als Text einfügen
+    const add = (el, ...kids) => el.append(...kids.filter((k) => k != null && k !== false));
+    add(card,
       h('div', { class: 'row between' },
         h('h3', {}, `${g.name} `, h('span', { class: 'code' }, g.code)),
         h('span', { class: `chip ${g.status === 'running' ? 'runner' : g.status === 'ended' ? 'plain' : 'gold'}` }, STATUS[g.status])),
       g.youPlay ? h('p', { class: 'small' }, h('span', { class: 'chip gold' }, '🎮 Du spielst mit'), ' – Live-Karte, Spieler- und Foto-Verwaltung sind gesperrt, damit es fair bleibt.') : null,
-      h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.spectators || 0} Zuschauer, ${g.photos} Fotos`),
+      h('p', { class: 'small muted' }, `${g.runners} Runner, ${g.hunters} Hunter, ${g.caught} gefangen, ${g.spectators || 0} Zuschauer, ${g.photos} Fotos (${fmtBytes(g.bytes || 0)})`
+        + (isSuper() && !g.mine ? ` · Spielleitung: ${g.owner || 'Admin'}` : '')),
       g.flagged.length ? h('p', { class: 'err small' }, `⚠️ Verdacht: ${g.flagged.map((f) => `${f.name} (${[f.flags.vpn && 'VPN', f.flags.spoof && 'GPS'].filter(Boolean).join(', ')})`).join(', ')}`) : null,
       h('div', { class: 'row' },
         h('input', { type: 'text', readonly: true, value: link, 'aria-label': 'Einladungslink', class: 'grow' }),
@@ -325,12 +345,15 @@
     const actions = h('div', { class: 'row' }, h('a', { class: 'btn small', href: `/g/${g.code}?admin=1` }, 'Live-Karte'));
     if (g.status === 'lobby') actions.append(h('button', { class: 'btn small runner', onclick: () => act(g.code, 'start') }, 'Spiel starten'));
     if (g.status === 'running') actions.append(h('button', { class: 'btn small hunter', onclick: () => confirm('Spiel jetzt beenden?') && act(g.code, 'end') }, 'Spiel beenden'));
-    actions.append(
+    add(actions,
       h('button', { class: 'btn small light', onclick: () => { const t = prompt('Nachricht an alle Spieler:'); if (t) act(g.code, 'announce', { text: t }); } }, 'Nachricht senden'),
       h('button', { class: 'btn small light', onclick: () => toggle(openPlayers, g.code) }, 'Spieler'),
       h('button', { class: 'btn small light', onclick: () => toggle(openPhotos, g.code) }, 'Fotos'),
       h('button', { class: 'btn small light', onclick: () => toggle(openEdit, g.code) }, 'Einstellungen'),
       h('button', { class: 'btn small light', onclick: () => confirm('Alle Positionen, Fotos, Fähigkeiten und Nachrichten löschen und zurück in die Lobby?') && act(g.code, 'reset') }, 'Zurücksetzen'),
+      g.status === 'ended' && g.photos > 0 && h('button', { class: 'btn small light', title: 'Gibt Speicher frei. Ergebnis, Karte und Verlauf bleiben erhalten.', onclick: async () => {
+        if (confirm(`Alle ${g.photos} Fotos und Sprachnachrichten von „${g.name}“ löschen? Das Ergebnis bleibt erhalten.`) && await act(g.code, 'purgephotos')) toast('Fotos gelöscht');
+      } }, '🗑️ Fotos löschen'),
       h('button', {
         class: 'btn small light', onclick: async () => {
           if (!confirm(`Spiel „${g.name}“ samt Fotos endgültig löschen?`)) return;
@@ -361,9 +384,10 @@
     if (loading || !token) return;
     loading = true;
     try {
-      const { games } = await api('/api/admin/games', { token });
+      const { games, storage } = await api('/api/admin/games', { token });
+      renderQuota(storage, games);
       const box = $('#games'); box.replaceChildren();
-      if (!games.length) box.append(h('div', { class: 'card' }, h('p', {}, 'Noch kein Spiel angelegt. Lege oben dein erstes Spiel an.')));
+      if (!games.length) box.append(h('div', { class: 'card' }, h('p', {}, 'Noch keine Runde angelegt. Lege oben deine erste Runde an und schick den Link an deine Freunde.')));
       else box.append(...games.map(gameCard));
     } catch (e) {
       if (e.status === 401) { localStorage.removeItem(KEY); token = null; showLogin(); }
@@ -381,11 +405,35 @@
         !CAT.mailConfigured && h('p', { class: 'err small' }, 'Kein SMTP-Server eingerichtet: Bestätigungscodes stehen nur im Server-Log. Du kannst Accounts hier auch von Hand bestätigen.'),
         h('ul', { class: 'plist' }, accounts.map((a) => h('li', {},
           h('div', { class: 'grow' }, h('div', { class: 'name' }, a.username, a.isAdmin ? ' 👑' : ''),
-            h('div', { class: 'small muted' }, `${a.email} · ${a.stats.points} Punkte · ${a.stats.games} Spiele`)),
+            h('div', { class: 'small muted' }, `${a.email} · ${a.stats.points} Punkte · ${a.stats.games} Spiele`
+              + (a.storage && !a.storage.unlimited ? ` · Speicher ${fmtBytes(a.storage.used)} / ${fmtBytes(a.storage.quota)}${a.quotaMb ? ' (eigenes Kontingent)' : ''}` : ''))),
+          !a.isAdmin && h('button', { class: 'btn small light', onclick: async () => {
+            const v = prompt(`Speicherkontingent für ${a.username} in MB (leer = Standard):`, a.quotaMb || '');
+            if (v === null) return;
+            try { await api(`/api/admin/accounts/${a.id}/quota`, { method: 'POST', token, body: { mb: Number(v) || 0 } }); loadAccounts(); } catch (e) { toast(e.message); }
+          } }, 'Kontingent'),
           a.verified ? h('span', { class: 'chip runner' }, 'bestätigt') : h('button', { class: 'btn small light', onclick: async () => { await api(`/api/admin/accounts/${a.id}/verify`, { method: 'POST', token, body: {} }); loadAccounts(); } }, 'Bestätigen'),
           h('button', { class: 'btn small light', onclick: async () => { if (confirm(`Statistik von ${a.username} zurücksetzen?`)) { await api(`/api/admin/accounts/${a.id}/resetstats`, { method: 'POST', token, body: {} }); loadAccounts(); } } }, 'Statistik zurücksetzen'),
           !a.isAdmin && h('button', { class: 'btn small light', onclick: async () => { if (confirm(`Account ${a.username} löschen?`)) { try { await api(`/api/admin/accounts/${a.id}`, { method: 'DELETE', token }); loadAccounts(); } catch (e) { toast(e.message); } } } }, 'Löschen'),
         )))));
+    } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
+  }
+
+  /* --- Speicherübersicht (Admins) --- */
+  async function loadStorage() {
+    const box = $('#tab-storage');
+    try {
+      const { total, rows, defaultQuotaMb } = await api('/api/admin/storage', { token });
+      box.replaceChildren(h('div', { class: 'card stack' },
+        h('h2', {}, `Speicher: ${fmtBytes(total)} in allen Runden`),
+        h('p', { class: 'small muted' }, `Standard-Kontingent pro Account: ${defaultQuotaMb} MB (USER_QUOTA_MB). Admins haben kein Limit. Ein eigenes Kontingent setzt du unter „Accounts“.`),
+        rows.length ? h('ul', { class: 'plist' }, rows.map((r) => {
+          const pct = r.unlimited ? 0 : Math.min(100, Math.round((r.used / r.quota) * 100));
+          return h('li', {},
+            h('div', { class: 'grow' }, h('div', { class: 'name' }, r.username),
+              h('div', { class: 'small muted' }, `${r.games} Runden · ${fmtBytes(r.used)}${r.unlimited ? ' (unbegrenzt)' : ` von ${fmtBytes(r.quota)} (${pct} %)`}`)),
+            pct >= 95 ? h('span', { class: 'chip hunter' }, 'voll') : pct >= 80 ? h('span', { class: 'chip gold' }, 'fast voll') : null);
+        })) : h('p', { class: 'muted' }, 'Noch keine Runden von Spielern.')));
     } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
   }
 
@@ -422,7 +470,9 @@
   async function start() {
     try { CAT = await api('/api/admin/catalog', { token }); }
     catch (e) { if (e.status === 401) { localStorage.removeItem(KEY); token = null; showLogin(); return; } toast(e.message); return; }
-    $('#who').textContent = localStorage.getItem(KEY + ':user') ? `· ${localStorage.getItem(KEY + ':user')}` : '';
+    $('#who').textContent = (CAT.username || localStorage.getItem(KEY + ':user')) ? `· ${CAT.username || localStorage.getItem(KEY + ':user')}${isSuper() ? ' 👑' : ''}` : '';
+    for (const b of document.querySelectorAll('#dash .tabs [data-super]')) b.hidden = !isSuper();
+    document.querySelector('#dash .tabs').hidden = !isSuper();
     $('#login').hidden = true; $('#dash').hidden = false; $('#logout').hidden = false;
     const newForm = settingsForm(CAT.defaults);
     $('#newForm').replaceChildren(newForm.el);
@@ -430,7 +480,7 @@
       $('#newErr').textContent = '';
       try {
         await api('/api/admin/games', { method: 'POST', token, body: { name: $('#newName').value, settings: newForm.read() } });
-        $('#newWrap').open = false; toast('Spiel angelegt'); load();
+        $('#newWrap').open = false; toast('Runde angelegt – schick jetzt den Link herum'); load();
       } catch (e) { $('#newErr').textContent = e.message; }
     };
     load();

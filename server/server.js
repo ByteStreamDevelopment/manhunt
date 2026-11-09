@@ -40,6 +40,16 @@ const TICK_MS = 5000;
 /** Accounts mit diesen Namen sind Admins (Groß-/Kleinschreibung egal). */
 const ADMIN_USERNAMES = String(process.env.ADMIN_USERNAMES || 'ProfImpossible,Mrcoolgamer11')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+/**
+ * Jeder bestätigte Account darf Runden anlegen. Damit Fotos den Server nicht zumüllen, hat jeder (außer Admins)
+ * ein Speicherkontingent: Fotos und Sprachnachrichten aller eigenen Runden zählen dazu.
+ */
+const MB = 1024 * 1024;
+const USER_QUOTA_MB = Math.max(1, Number(process.env.USER_QUOTA_MB) || 1024);
+/** So viele nicht beendete Runden (Lobby oder laufend) darf ein normaler Account gleichzeitig haben */
+const MAX_OPEN_GAMES = Math.max(1, Number(process.env.MAX_OPEN_GAMES) || 3);
+/** Laufende Runden enden spätestens nach so vielen Stunden automatisch (vergessene Runden) */
+const MAX_GAME_HOURS = Math.max(1, Number(process.env.MAX_GAME_HOURS) || 24);
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 fs.mkdirSync(GALLERY_DIR, { recursive: true });
@@ -216,7 +226,11 @@ for (const g of Object.values(db.games)) {
   g.effects ||= []; g.pickups ||= []; g.photos ||= []; g.messages ||= []; g.locations ||= []; g.chat ||= [];
   for (const p of Object.values(g.players)) { migratePlayer(p); p.gameCode = g.code; }
   indexLocations(g);
+  // Dateigrößen für das Speicherkontingent nachtragen (ältere Spielstände)
+  for (const ph of g.photos) if (ph.size === undefined) ph.size = fileSize(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`));
+  for (const c of g.chat) if (c.voice && c.voice.size === undefined) c.voice.size = fileSize(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`));
 }
+function fileSize(f) { try { return fs.statSync(f).size; } catch { return 0; } }
 function migratePlayer(p) {
   p.abilities ||= {}; p.quests ||= []; p.inbox ||= []; p.flags ||= {}; p.points ||= 0; p.jokers ||= []; p.cooldowns ||= {};
   if (p.penalty === undefined) p.penalty = null;
@@ -527,10 +541,11 @@ function checkBadges(a, pl) {
 /* ------------------------------------------------------------------ */
 /* Spiel-Logik                                                         */
 /* ------------------------------------------------------------------ */
-function newGame(name, settings) {
+function newGame(name, settings, owner = null) {
   const code = newCode();
   db.games[code] = {
     code, name, status: 'lobby', createdAt: Date.now(), startedAt: null, endedAt: null,
+    ownerId: owner ? owner.id : null, ownerName: owner ? owner.username : null,
     settings: sanitizeSettings(settings), players: {}, locations: [], photos: [], messages: [],
     effects: [], pickups: [], nextPickupAt: 0, chat: [], _byPid: new Map(),
   };
@@ -1179,6 +1194,9 @@ setInterval(() => {
     if (g.settings.autoEndAfterMin > 0 && now >= g.startedAt + g.settings.autoEndAfterMin * 60000) {
       endGame(g, 'Die Zeit ist um. Die Runner gewinnen!', 'runners'); save(); notify(g.code); continue;
     }
+    if (now >= g.startedAt + MAX_GAME_HOURS * 3600e3) {
+      endGame(g, `Die Runde lief länger als ${MAX_GAME_HOURS} Stunden und wurde automatisch beendet.`); save(); notify(g.code); continue;
+    }
     // abgelaufene Effekte melden
     for (const e of g.effects) {
       if (!e.done && e.until <= now) {
@@ -1340,7 +1358,9 @@ function buildState(g, auth) {
   const gallerySet = new Set(db.gallery.map((x) => x.photoId));
   return {
     now,
-    game: { code: g.code, name: g.name, status: g.status, startedAt: g.startedAt, endedAt: g.endedAt, releaseAt },
+    game: { code: g.code, name: g.name, status: g.status, startedAt: g.startedAt, endedAt: g.endedAt, releaseAt, owner: g.ownerName || null },
+    // Spielleitung: darf Fotos in die Galerie übernehmen (nur Admins)?
+    canFeature: isAdmin ? !!auth.mgr?.superAdmin : undefined,
     settings: s,
     self,
     players,
@@ -1362,16 +1382,6 @@ function reactionCounts(r) {
   const out = {};
   for (const e of Object.values(r || {})) out[e] = (out[e] || 0) + 1;
   return out;
-}
-function adminSummary(g) {
-  const ps = Object.values(g.players);
-  return {
-    code: g.code, name: g.name, status: g.status, createdAt: g.createdAt, startedAt: g.startedAt, endedAt: g.endedAt,
-    settings: g.settings, runners: ps.filter((p) => p.role === 'runner').length, hunters: ps.filter((p) => p.role === 'hunter').length,
-    caught: ps.filter((p) => p.caught || p.converted).length, photos: g.photos.length,
-    spectators: ps.filter((p) => p.role === 'spectator').length,
-    flagged: ps.filter((p) => p.flags && (p.flags.vpn || p.flags.spoof)).map((p) => ({ id: p.id, name: p.name, flags: p.flags })),
-  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1468,6 +1478,7 @@ async function handleMe(req, res, url) {
     }
     // In Spielen bleibt der Spielername stehen, die Verbindung zum Konto wird getrennt
     for (const g of Object.values(db.games)) for (const pl of Object.values(g.players)) if (pl.accountId === a.id) pl.accountId = null;
+    releaseOwnedGames(a);
     // Galerie-Einträge bleiben (von der Spielleitung ausgewählt), aber ohne Kontoverknüpfung
     for (const x of db.gallery) if (x.accountId === a.id) x.accountId = null;
     delete db.accounts[a.id];
@@ -1553,8 +1564,10 @@ async function handleApi(req, res, url) {
     const b = await readJSON(req);
     if (b.username) {
       const a = findAccount(b.username);
-      if (!a || !isAdminAccount(a) || !a.verified || !safeEq(a.hash, hashPassword(b.password || '', a.salt))) throw new HttpError(401, 'Kein Admin-Account oder falsches Passwort');
-      return sendJSON(res, 200, { token: makeAdminToken(a.username), username: a.username });
+      if (!a || !safeEq(a.hash, hashPassword(b.password || '', a.salt))) throw new HttpError(401, 'Benutzername oder Passwort falsch');
+      if (!a.verified) throw new HttpError(403, 'Bitte bestätige zuerst deine E-Mail-Adresse.');
+      // Admins bekommen ein Admin-Token, alle anderen ihr normales Konto-Token (verwalten damit ihre eigenen Runden)
+      return sendJSON(res, 200, { token: isAdminAccount(a) ? makeAdminToken(a.username) : makeAccountToken(a), username: a.username, superAdmin: isAdminAccount(a) });
     }
     if (!safeEq(String(b.password ?? ''), ADMIN_PASSWORD)) throw new HttpError(401, 'Falsches Passwort');
     return sendJSON(res, 200, { token: makeAdminToken() });
@@ -1566,43 +1579,153 @@ async function handleApi(req, res, url) {
   throw new HttpError(404, 'Nicht gefunden');
 }
 
-const isAdminRequest = (t) => !!checkAdminToken(t) || isAdminAccount(accountFromToken(t));
-/** Name des Admin-Accounts hinter einem Token ('' = Server-Passwort, null = kein Admin) */
-function adminName(t) {
+/* ------------------------------------------------------------------ */
+/* Spielleitung: Admins dürfen alles, jeder Account seine eigenen Runden */
+/* ------------------------------------------------------------------ */
+/**
+ * Wer steckt hinter einem Token? null = niemand.
+ * superAdmin: Server-Passwort oder Admin-Account (alle Runden, Accounts, Galerie).
+ * account: der Account (bei Admin-Token mit Namen ebenfalls aufgelöst).
+ */
+function managerFor(t) {
   const c = checkAdminToken(t);
-  if (c) return c.username;
+  if (c) {
+    const a = c.username ? findAccount(c.username) : null;
+    return { superAdmin: true, account: a, name: c.username };
+  }
   const a = accountFromToken(t);
-  return isAdminAccount(a) ? a.username : null;
+  if (!a || !a.verified) return null;
+  return { superAdmin: isAdminAccount(a), account: a, name: a.username };
 }
+const isOwner = (mgr, g) => !!(mgr && mgr.account && g.ownerId && g.ownerId === mgr.account.id);
+const canManage = (mgr, g) => !!mgr && (mgr.superAdmin || isOwner(mgr, g));
 /**
  * Spielt die Spielleitung in diesem Spiel selbst mit (als Runner/Hunter, Spiel nicht beendet)?
  * Dann bekommt sie keine Vorteile: keine Rundumsicht, keine Geschenke, kein Fangen/Entfernen usw.
  */
-function adminPlaysIn(g, t) {
-  const name = adminName(t);
-  if (!name || g.status === 'ended') return false;
-  return Object.values(g.players).some((p) => isPlaying(p) && p.accountId && db.accounts[p.accountId]?.username.toLowerCase() === name.toLowerCase());
+function managerPlaysIn(g, mgr) {
+  if (!mgr || g.status === 'ended') return false;
+  const id = mgr.account?.id, name = (mgr.name || '').toLowerCase();
+  if (!id && !name) return false;
+  return Object.values(g.players).some((p) => isPlaying(p) && p.accountId && (p.accountId === id || db.accounts[p.accountId]?.username.toLowerCase() === name));
 }
 const PLAYING_ADMIN = 'Du spielst in diesem Spiel selbst mit – Spielleitungs-Vorteile sind gesperrt.';
 
+/* ---------------- Speicherkontingent ---------------- */
+function gameBytes(g) {
+  let n = 0;
+  for (const ph of g.photos) n += ph.size || 0;
+  for (const c of g.chat) if (c.voice) n += c.voice.size || 0;
+  return n;
+}
+/** Kontingent in Bytes (Infinity für Admins) */
+const quotaOf = (a) => (!a ? Infinity : isAdminAccount(a) ? Infinity : (a.quotaMb || USER_QUOTA_MB) * MB);
+const usageOf = (a) => Object.values(db.games).reduce((n, g) => (g.ownerId === a.id ? n + gameBytes(g) : n), 0);
+function storageInfo(a) {
+  const quota = quotaOf(a);
+  return { used: a ? usageOf(a) : 0, quota: Number.isFinite(quota) ? quota : null, unlimited: !Number.isFinite(quota) };
+}
+/** Konto wird gelöscht: eigene Runden beenden, deren Fotos löschen; Ergebnis und Verlauf bleiben für die Mitspieler */
+function releaseOwnedGames(a) {
+  for (const g of Object.values(db.games)) {
+    if (g.ownerId !== a.id) continue;
+    if (g.status === 'running') endGame(g, 'Die Spielleitung hat ihr Konto gelöscht.');
+    if (g.status === 'lobby') { deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; continue; }
+    deletePhotoFiles(g.code); deleteVoiceFiles(g.code);
+    g.photos = []; for (const c of g.chat) if (c.voice) c.voice = null;
+    g.ownerId = null; g.ownerName = null;
+    notify(g.code);
+  }
+}
+const ownerOf = (g) => (g.ownerId && db.accounts[g.ownerId]) || null;
+/** Passt eine weitere Datei dieser Größe noch ins Kontingent der Spielleitung? (Runden ohne Besitzer: unbegrenzt) */
+function hasRoomFor(g, bytes) {
+  const o = ownerOf(g);
+  return !o || usageOf(o) + bytes <= quotaOf(o);
+}
+const fmtMb = (b) => `${Math.round(b / MB)} MB`;
+/** Bei 80 % einmal warnen */
+function quotaCheck(g) {
+  const o = ownerOf(g);
+  if (!o || !Number.isFinite(quotaOf(o))) return;
+  const used = usageOf(o), quota = quotaOf(o);
+  if (used < quota * 0.8) { if (o.quotaWarned) { o.quotaWarned = 0; save(); } return; }
+  if (o.quotaWarned) return;
+  o.quotaWarned = Date.now();
+  social.notifyAccount(o.id, { title: '💾 Speicher fast voll', body: `Deine Runden belegen ${fmtMb(used)} von ${fmtMb(quota)}. Lösche alte Runden oder deren Fotos.`, url: '/admin', tag: 'quota' });
+}
+/** Speicher voll: Spielleitung und Spieler einmal pro Runde informieren */
+function quotaFull(g) {
+  if (g.quotaFullAt) return;
+  g.quotaFullAt = Date.now();
+  const o = ownerOf(g);
+  pushMsg(g, '💾 Der Speicherplatz der Spielleitung ist voll. Fotos zählen weiter, werden aber nicht mehr gespeichert.');
+  if (o) social.notifyAccount(o.id, { title: '💾 Speicher voll', body: `In „${g.name}“ werden keine Fotos mehr gespeichert. Lösche alte Runden oder deren Fotos.`, url: '/admin', tag: 'quota', urgent: true });
+}
+function adminSummary(g, mgr = null) {
+  const ps = Object.values(g.players);
+  return {
+    code: g.code, name: g.name, status: g.status, createdAt: g.createdAt, startedAt: g.startedAt, endedAt: g.endedAt,
+    settings: g.settings, runners: ps.filter((p) => p.role === 'runner').length, hunters: ps.filter((p) => p.role === 'hunter').length,
+    caught: ps.filter((p) => p.caught || p.converted).length, photos: g.photos.length,
+    spectators: ps.filter((p) => p.role === 'spectator').length,
+    flagged: ps.filter((p) => p.flags && (p.flags.vpn || p.flags.spoof)).map((p) => ({ id: p.id, name: p.name, flags: p.flags })),
+    owner: g.ownerName || null, bytes: gameBytes(g),
+    mine: mgr ? isOwner(mgr, g) : undefined,
+    youPlay: mgr ? managerPlaysIn(g, mgr) : undefined,
+  };
+}
+/** Gibt es noch Platz für eine neue Runde? (Admins: immer) */
+function checkCanCreate(mgr) {
+  if (mgr.superAdmin) return;
+  const a = mgr.account;
+  const open = Object.values(db.games).filter((g) => g.ownerId === a.id && g.status !== 'ended').length;
+  if (open >= MAX_OPEN_GAMES) throw new HttpError(409, `Du hast schon ${open} offene Runden. Beende oder lösche zuerst eine (höchstens ${MAX_OPEN_GAMES} gleichzeitig).`);
+  if (usageOf(a) >= quotaOf(a) * 0.95) throw new HttpError(507, `Dein Speicherplatz (${fmtMb(quotaOf(a))}) ist voll. Lösche alte Runden oder deren Fotos.`);
+}
+
 async function handleAdmin(req, res, url) {
   const token = req.headers['x-token'] || url.searchParams.get('t');
-  if (!isAdminRequest(token)) throw new HttpError(401, 'Nicht angemeldet');
+  const mgr = managerFor(token);
+  if (!mgr) throw new HttpError(401, 'Nicht angemeldet');
   const m = req.method, p = url.pathname;
+  const superOnly = () => { if (!mgr.superAdmin) throw new HttpError(403, 'Nur für Admins'); };
 
-  if (p === '/api/admin/catalog' && m === 'GET') return sendJSON(res, 200, { ...catalogForClients(), defaults: DEFAULTS, mailConfigured: smtp.enabled() });
+  if (p === '/api/admin/catalog' && m === 'GET') {
+    return sendJSON(res, 200, {
+      ...catalogForClients(), defaults: DEFAULTS, mailConfigured: smtp.enabled(),
+      superAdmin: mgr.superAdmin, username: mgr.name || null, maxOpenGames: MAX_OPEN_GAMES,
+      storage: mgr.account ? storageInfo(mgr.account) : { used: 0, quota: null, unlimited: true },
+    });
+  }
   if (p === '/api/admin/games' && m === 'GET') {
-    const games = Object.values(db.games).sort((a, b) => b.createdAt - a.createdAt).map((g) => ({ ...adminSummary(g), youPlay: adminPlaysIn(g, token) }));
-    return sendJSON(res, 200, { games });
+    // Admins sehen alle Runden (mit ?mine=1 nur die eigenen), alle anderen nur ihre eigenen
+    const onlyMine = !mgr.superAdmin || url.searchParams.get('mine') === '1';
+    const games = Object.values(db.games).filter((g) => (onlyMine ? isOwner(mgr, g) : true))
+      .sort((a, b) => b.createdAt - a.createdAt).map((g) => adminSummary(g, mgr));
+    return sendJSON(res, 200, {
+      games, superAdmin: mgr.superAdmin, maxOpenGames: MAX_OPEN_GAMES,
+      storage: mgr.account ? storageInfo(mgr.account) : { used: 0, quota: null, unlimited: true },
+    });
   }
   if (p === '/api/admin/games' && m === 'POST') {
+    if (!mgr.superAdmin) rateLimit(req, 'creategame', 20, 3600e3);
+    checkCanCreate(mgr);
     const b = await readJSON(req);
-    const g = newGame(cleanText(b.name, 40) || 'Manhunt', b.settings);
-    return sendJSON(res, 201, adminSummary(g));
+    const g = newGame(cleanText(b.name, 40) || 'Manhunt', b.settings, mgr.account);
+    return sendJSON(res, 201, adminSummary(g, mgr));
+  }
+  if (p.startsWith('/api/admin/accounts') || p.startsWith('/api/admin/gallery') || p.startsWith('/api/admin/photos') || p === '/api/admin/storage') superOnly();
+  // Speicherübersicht aller Accounts (nur Admins)
+  if (p === '/api/admin/storage' && m === 'GET') {
+    const rows = Object.values(db.accounts).map((a) => ({ id: a.id, username: a.username, ...storageInfo(a), games: Object.values(db.games).filter((g) => g.ownerId === a.id).length }))
+      .filter((r) => r.games > 0).sort((x, y) => y.used - x.used);
+    const total = Object.values(db.games).reduce((n, g) => n + gameBytes(g), 0);
+    return sendJSON(res, 200, { total, rows, defaultQuotaMb: USER_QUOTA_MB });
   }
   // Accounts
   if (p === '/api/admin/accounts' && m === 'GET') {
-    return sendJSON(res, 200, { accounts: Object.values(db.accounts).sort((a, b) => b.createdAt - a.createdAt).map(publicAccount) });
+    return sendJSON(res, 200, { accounts: Object.values(db.accounts).sort((a, b) => b.createdAt - a.createdAt).map((a) => ({ ...publicAccount(a), storage: storageInfo(a), quotaMb: a.quotaMb || null })) });
   }
   const am = p.match(/^\/api\/admin\/accounts\/([a-f0-9]+)(?:\/(\w+))?$/);
   if (am) {
@@ -1610,10 +1733,19 @@ async function handleAdmin(req, res, url) {
     if (!a) throw new HttpError(404, 'Account nicht gefunden');
     if (!am[2] && m === 'DELETE') {
       if (isAdminAccount(a)) throw new HttpError(409, 'Admin-Accounts können nicht gelöscht werden');
+      releaseOwnedGames(a);
       delete db.accounts[a.id]; save(); return sendJSON(res, 200, { ok: true });
     }
     if (am[2] === 'verify' && m === 'POST') { a.verified = true; a.code = null; save(); return sendJSON(res, 200, publicAccount(a)); }
     if (am[2] === 'resetstats' && m === 'POST') { a.stats = emptyStats(); save(); return sendJSON(res, 200, publicAccount(a)); }
+    // Eigenes Kontingent für einen Account (MB, leer/0 = Standard)
+    if (am[2] === 'quota' && m === 'POST') {
+      const b = await readJSON(req);
+      const mb = Math.round(Number(b.mb) || 0);
+      if (mb < 0 || mb > 1024 * 1024) throw new HttpError(400, 'Ungültige Größe');
+      a.quotaMb = mb || null; a.quotaWarned = 0; save();
+      return sendJSON(res, 200, { ...publicAccount(a), storage: storageInfo(a), quotaMb: a.quotaMb });
+    }
     throw new HttpError(404, 'Unbekannte Aktion');
   }
   // Galerie
@@ -1632,7 +1764,7 @@ async function handleAdmin(req, res, url) {
     const b = await readJSON(req);
     let n = 0;
     for (const f of fs.readdirSync(PHOTO_DIR)) { try { fs.unlinkSync(path.join(PHOTO_DIR, f)); n++; } catch { /* egal */ } }
-    for (const g of Object.values(db.games)) { g.photos = []; notify(g.code); }
+    for (const g of Object.values(db.games)) { g.photos = []; g.quotaFullAt = null; notify(g.code); }
     if (b.includeGallery) {
       for (const f of fs.readdirSync(GALLERY_DIR)) { try { fs.unlinkSync(path.join(GALLERY_DIR, f)); n++; } catch { /* egal */ } }
       db.gallery = [];
@@ -1644,27 +1776,40 @@ async function handleAdmin(req, res, url) {
   const r = p.match(/^\/api\/admin\/games\/([A-Za-z0-9]+)(?:\/(\w+))?$/);
   if (!r) throw new HttpError(404, 'Nicht gefunden');
   const g = getGame(r[1]); const act = r[2];
+  // Fremde Runden: für normale Accounts so, als gäbe es sie nicht
+  if (!canManage(mgr, g)) throw new HttpError(404, 'Spiel nicht gefunden');
 
+  // Löschen: Admins jede Runde, alle anderen ihre eigenen (gibt den Speicher frei)
   if (!act && m === 'DELETE') {
+    if (g.status === 'running' && !mgr.superAdmin) throw new HttpError(409, 'Beende die Runde zuerst, bevor du sie löschst.');
     deletePhotoFiles(g.code); deleteVoiceFiles(g.code); delete db.games[g.code]; save();
+    for (const res2 of sseClients.get(g.code) || []) res2.end();
+    sseClients.delete(g.code);
     return sendJSON(res, 200, { ok: true });
   }
-  const playing = adminPlaysIn(g, token);
+  const playing = managerPlaysIn(g, mgr);
   if (!act && m === 'PATCH') {
     const b = await readJSON(req);
     if (playing && g.status !== 'lobby' && b.settings) throw new HttpError(403, `${PLAYING_ADMIN} Einstellungen nur in der Lobby.`);
     if (b.name !== undefined) g.name = cleanText(b.name, 40) || g.name;
     if (b.settings) g.settings = sanitizeSettings(b.settings, g.settings);
     save(); notify(g.code);
-    return sendJSON(res, 200, adminSummary(g));
+    return sendJSON(res, 200, adminSummary(g, mgr));
   }
   if (m === 'POST') {
     const b = await readJSON(req);
     // Mitspielende Spielleitung: nur neutrale Aktionen (starten, beenden, zurücksetzen, Durchsage)
-    if (playing && !['start', 'end', 'reset', 'announce'].includes(act)) throw new HttpError(403, PLAYING_ADMIN);
+    if (playing && !['start', 'end', 'reset', 'announce', 'purgephotos'].includes(act)) throw new HttpError(403, PLAYING_ADMIN);
     if (act === 'start') startGame(g);
     else if (act === 'end') endGame(g, 'Beendet von der Spielleitung.');
     else if (act === 'reset') resetGame(g);
+    else if (act === 'purgephotos') {
+      // Fotos und Sprachnachrichten dieser Runde löschen, Ergebnis und Verlauf bleiben (gibt Speicher frei)
+      if (g.status === 'running') throw new HttpError(409, 'Fotos lassen sich erst nach Spielende löschen.');
+      deletePhotoFiles(g.code); deleteVoiceFiles(g.code);
+      g.photos = []; for (const c of g.chat) if (c.voice) { c.voice = null; c.text ||= '🎙️ (gelöscht)'; }
+      g.photosPurgedAt = Date.now(); g.quotaFullAt = null;
+    }
     else if (act === 'announce') { const t = cleanText(b.text, 300); if (!t) throw new HttpError(400, 'Nachricht fehlt'); pushMsg(g, t, 'admin'); }
     else if (act === 'kick') { delete g.players[b.playerId]; clearLocations(g, b.playerId); g.photos = g.photos.filter((x) => x.pid !== b.playerId); }
     else if (act === 'give') {
@@ -1697,6 +1842,7 @@ async function handleAdmin(req, res, url) {
         }
       }
     } else if (act === 'feature') {
+      if (!mgr.superAdmin) throw new HttpError(403, 'Nur Admins wählen Fotos für die Galerie aus.');
       const ph = g.photos.find((x) => x.id === b.photoId);
       if (!ph) throw new HttpError(404, 'Foto nicht gefunden');
       if (db.gallery.some((x) => x.photoId === ph.id)) throw new HttpError(409, 'Das Foto ist schon in der Galerie');
@@ -1711,7 +1857,7 @@ async function handleAdmin(req, res, url) {
       if (pl) { award(pl, 'featured', POINTS.featured); inbox(pl, '⭐ Eins deiner Fotos ist jetzt in der Galerie der besten Fotos!', 'reward'); }
     } else throw new HttpError(404, 'Unbekannte Aktion');
     checkAllCaught(g); save(); notify(g.code);
-    return sendJSON(res, 200, adminSummary(g));
+    return sendJSON(res, 200, adminSummary(g, mgr));
   }
   throw new HttpError(405, 'Methode nicht erlaubt');
 }
@@ -1796,10 +1942,10 @@ async function handleGame(req, res, url, code, rest) {
   // Ab hier ist eine Anmeldung nötig
   const t = req.headers['x-token'] || url.searchParams.get('t') || '';
   let auth = null;
-  if (isAdminRequest(t)) {
-    if (adminPlaysIn(g, t)) throw new HttpError(403, `${PLAYING_ADMIN} Öffne das Spiel mit deinem Spieler-Zugang.`);
-    auth = { admin: true };
-  }
+  const mgr0 = managerFor(t);
+  const mgr = canManage(mgr0, g) ? mgr0 : null;
+  if (mgr && !managerPlaysIn(g, mgr)) auth = { admin: true, mgr };
+  else if (mgr && checkAdminToken(t)) throw new HttpError(403, `${PLAYING_ADMIN} Öffne das Spiel mit deinem Spieler-Zugang.`);
   else {
     let player = Object.values(g.players).find((pl) => safeEq(pl.token, t));
     if (player) player.lastSeen = Date.now();
@@ -1879,10 +2025,11 @@ async function handleGame(req, res, url, code, rest) {
     chatGate(pl);
     const buf = await readBody(req, MAX_VOICE_BYTES);
     if (buf.length < 200) throw new HttpError(400, 'Aufnahme zu kurz');
+    if (!hasRoomFor(g, buf.length)) throw new HttpError(507, 'Der Speicherplatz der Spielleitung ist voll – Sprachnachrichten gehen gerade nicht, Text schon.');
     const id = rid(6);
     await fsp.writeFile(path.join(VOICE_DIR, `${g.code}_${id}.${ext}`), buf);
     const dur = Math.max(1, Math.min(60, Math.round(Number(url.searchParams.get('dur')) || 0)));
-    pushChat(g, pl, { text: '', voice: { id, ext, type, dur } }, chatChannel(g, pl, url.searchParams.get('channel')));
+    pushChat(g, pl, { text: '', voice: { id, ext, type, dur, size: buf.length } }, chatChannel(g, pl, url.searchParams.get('channel')));
     save(); notify(g.code);
     return sendJSON(res, 201, { ok: true, id });
   }
@@ -1909,16 +2056,25 @@ async function handleGame(req, res, url, code, rest) {
     }
     const buf = await readBody(req, MAX_PHOTO_BYTES);
     if (buf.length < 100 || buf[0] !== 0xff || buf[1] !== 0xd8) throw new HttpError(400, 'Bitte ein JPEG-Foto senden');
+    const now = Date.now();
+    // Speicher der Spielleitung voll: Das Foto zählt trotzdem (keine Live-Strafe, Quest erfüllt), wird aber nicht gespeichert.
+    if (!hasRoomFor(g, buf.length)) {
+      quotaFull(g);
+      if (pl.role === 'runner') photoCredited(g, pl, now);
+      if (quest) completeQuest(g, pl, quest);
+      save(); notify(g.code);
+      return sendJSON(res, 201, { ok: true, id: null, stored: false, warning: 'Foto gezählt, aber nicht gespeichert: Der Speicherplatz der Spielleitung ist voll.' });
+    }
     const id = rid(6);
     await fsp.writeFile(path.join(PHOTO_DIR, `${g.code}_${id}.jpg`), buf);
-    const now = Date.now();
-    g.photos.push({ id, pid: pl.id, ts: now, quest: quest ? quest.key : null });
+    g.photos.push({ id, pid: pl.id, ts: now, quest: quest ? quest.key : null, size: buf.length });
     if (quest) quest.photoId = id;
     award(pl, 'photos', POINTS.photo);
     if (pl.role === 'runner') photoCredited(g, pl, now);
     if (quest) completeQuest(g, pl, quest);
+    quotaCheck(g);
     save(); notify(g.code);
-    return sendJSON(res, 201, { ok: true, id });
+    return sendJSON(res, 201, { ok: true, id, stored: true });
   }
 
   // Alle Fotos als ZIP: nach Spielende für alle Mitspieler, für die Spielleitung jederzeit.

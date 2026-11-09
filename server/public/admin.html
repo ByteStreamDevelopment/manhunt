@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Manhunt – Spielleitung</title>
+  <title>Manhunt – Meine Runden</title>
   <meta name="theme-color" content="#14201a">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
@@ -23,9 +23,9 @@
   <main class="wrap">
     <section id="login" class="card stack" hidden>
       <h2>Anmelden</h2>
-      <p class="small muted">Mit einem Admin-Account (ProfImpossible, Mrcoolgamer11) oder dem Server-Admin-Passwort.</p>
+      <p class="small muted">Jeder mit einem bestätigten Account kann eigene Runden anlegen und leiten. Admins sehen und verwalten alle Runden.</p>
       <div>
-        <label for="user">Benutzername (leer lassen für Server-Passwort)</label>
+        <label for="user">Benutzername oder E-Mail (leer lassen für Server-Passwort)</label>
         <input id="user" type="text" autocomplete="username">
       </div>
       <div>
@@ -39,11 +39,13 @@
     <section id="dash" hidden>
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="games" aria-selected="true">Spiele</button>
-        <button role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
-        <button role="tab" data-tab="gallery" aria-selected="false">Galerie</button>
+        <button role="tab" data-tab="accounts" aria-selected="false" data-super>Accounts</button>
+        <button role="tab" data-tab="storage" aria-selected="false" data-super>Speicher</button>
+        <button role="tab" data-tab="gallery" aria-selected="false" data-super>Galerie</button>
       </div>
 
       <div id="tab-games">
+        <div class="card" id="quota" hidden></div>
         <details class="card" id="newWrap">
           <summary>Neues Spiel anlegen</summary>
           <div class="stack" style="margin-top:1rem">
@@ -60,6 +62,7 @@
       </div>
 
       <div id="tab-accounts" hidden></div>
+      <div id="tab-storage" hidden></div>
       <div id="tab-gallery" hidden></div>
     </section>
   </main>

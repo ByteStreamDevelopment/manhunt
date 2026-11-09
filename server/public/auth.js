@@ -15,7 +15,9 @@ window.MHAuth = (() => {
 
     function done(r) {
       account.set({ token: r.token, username: r.account.username, email: r.account.email, isAdmin: r.account.isAdmin });
-      if (r.adminToken) localStorage.setItem('manhunt:admin', r.adminToken);
+      // Admin-Token für Admins, sonst das Konto-Token: damit verwaltet jeder seine eigenen Runden unter /admin
+      localStorage.setItem('manhunt:admin', r.adminToken || r.token);
+      localStorage.setItem('manhunt:admin:user', r.account.username);
       onDone && onDone(account.get());
     }
 

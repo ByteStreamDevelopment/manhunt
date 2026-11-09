@@ -39,6 +39,9 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.6: **Jeder kann eigene Runden erstellen** („➕ Eigene Runde erstellen“ bzw. Kachel „🎮 Meine Runden“).
+  Anzeige des Speicherkontingents (1 GB), Runden und deren Fotos löschen, Runde direkt im Spiel starten/beenden und
+  Freunde einladen, wenn man selbst mitspielt. Hinweis, wenn ein Foto wegen vollem Speicher nicht gespeichert wurde.
 - Neu in 2.5: Einstellungen (⚙️ auf dem Startbildschirm): nach Updates suchen, automatische Prüfung,
   helles/dunkles Design, topografische Karte, Bildschirm im Spiel anlassen, GPS-Sparmodus, Foto-Qualität,
   Benachrichtigungen, Passwort ändern, Abmelden, Konto löschen, Zwischenspeicher leeren.

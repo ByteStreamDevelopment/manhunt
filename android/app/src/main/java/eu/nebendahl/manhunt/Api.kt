@@ -146,11 +146,13 @@ object Api {
         return LocResult(r.optBoolean("ok", true), r.optLong("nextInMs", 10_000L).coerceAtLeast(2_000L), r.optBoolean("live"))
     }
 
-    fun uploadPhoto(code: String, token: String, jpeg: ByteArray, questId: String? = null) {
+    /** Gibt eine Warnung zurück, wenn das Foto gezählt, aber nicht gespeichert wurde (Speicher der Spielleitung voll) */
+    fun uploadPhoto(code: String, token: String, jpeg: ByteArray, questId: String? = null): String? {
         val q = if (questId != null) "?quest=" + URLEncoder.encode(questId, "UTF-8") else ""
         val req = Request.Builder().url(url("/api/g/$code/photo$q")).header("x-token", token)
             .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
-        call(req)
+        val r = json(req)
+        return if (r.optBoolean("stored", true)) null else r.optString("warning", "Foto gezählt, aber nicht gespeichert")
     }
 
     fun setCaught(code: String, token: String, playerId: String, caught: Boolean) {
@@ -236,7 +238,12 @@ object Api {
 
     /* ---------------- Spielleitung (mit dem Token eines Admin-Accounts) ---------------- */
 
-    fun adminGames(adminToken: String): List<AdminGame> = parseAdminGames(json(get("/api/admin/games", adminToken)))
+    fun adminGames(adminToken: String): AdminList = parseAdminList(json(get("/api/admin/games", adminToken)))
+
+    /** Runde löschen (eigene Runden oder als Admin jede) */
+    fun adminDelete(adminToken: String, code: String) {
+        json(Request.Builder().url(url("/api/admin/games/$code")).header("x-token", adminToken).delete().build())
+    }
 
     /** Standardwerte aller Einstellungen (inkl. Fähigkeiten/Quests) und Katalog. */
     fun adminCatalog(adminToken: String): JSONObject = json(get("/api/admin/catalog", adminToken))
