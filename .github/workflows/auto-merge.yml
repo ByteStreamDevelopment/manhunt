@@ -1,0 +1,66 @@
+# Jeder Push auf einen claude/…-Branch wird automatisch nach main übernommen – ohne Pull Request und manuelles Mergen.
+# Danach wird der Auto-Tag-Workflow angestoßen (neuer Versions-Tag -> Forgejo baut die APK -> App-Update),
+# aber nur, wenn sich App oder Server seit dem letzten Tag wirklich geändert haben.
+#
+# Konflikte mit main: Der Lauf schlägt fehl (GitHub schickt eine Mail), main bleibt unverändert.
+# Ausschalten: diese Datei löschen oder in GitHub unter Actions -> Auto-Merge -> "Disable workflow".
+name: Auto-Merge
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write   # main pushen
+  actions: write    # Auto-Tag-Workflow starten
+
+concurrency:
+  group: auto-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Branch nach main übernehmen
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$BRANCH" --tags
+          if git merge-base --is-ancestor "origin/$BRANCH" HEAD; then
+            echo "main enthält $BRANCH schon – nichts zu tun."
+            exit 0
+          fi
+          # Wenn möglich vorspulen (saubere Historie), sonst Merge-Commit
+          if ! git merge --ff-only "origin/$BRANCH"; then
+            git merge --no-ff --no-edit -m "Automatisch übernommen: $BRANCH" "origin/$BRANCH" || {
+              git merge --abort || true
+              echo "::error::Konflikt zwischen $BRANCH und main – bitte von Hand zusammenführen."
+              exit 1
+            }
+          fi
+          git push origin HEAD:main
+
+      - name: Neuen Versions-Tag anstoßen (nur bei Änderungen an App oder Server)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags -q
+          git checkout -q origin/main
+          if git log -1 --pretty=%B | grep -q '\[skip tag\]'; then echo "[skip tag] – kein neuer Tag."; exit 0; fi
+          LAST=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$LAST" ] && git diff --quiet "$LAST" HEAD -- android server; then
+            echo "App und Server unverändert seit $LAST – kein neuer Tag."
+            exit 0
+          fi
+          gh workflow run auto-tag.yml --ref main --repo "$GITHUB_REPOSITORY"
+          echo "Auto-Tag gestartet (letzter Tag: ${LAST:-keiner})."
