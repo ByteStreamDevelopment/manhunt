@@ -49,6 +49,17 @@ jobs:
           fi
           git push origin HEAD:main
 
+      # Forgejo spiegelt sonst nur alle paar Stunden (bzw. beim nächsten Tag) – so ist der Code dort sofort aktuell
+      - name: Forgejo synchronisieren
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          if [ -z "$FORGEJO_TOKEN" ]; then echo "Kein FORGEJO_TOKEN – Forgejo holt main beim nächsten Spiegel-Intervall."; exit 0; fi
+          curl -fsS -X POST -H "Authorization: token $FORGEJO_TOKEN" \
+            https://git.nebendahl.eu/api/v1/repos/Mrcoolgamer-Inc/manhunt/mirror-sync \
+            && echo "Forgejo-Synchronisation angestoßen." \
+            || echo "::warning::Forgejo-Synchronisation fehlgeschlagen (Token/Rechte prüfen)."
+
       - name: Neuen Versions-Tag anstoßen (nur bei Änderungen an App oder Server)
         env:
           GH_TOKEN: ${{ github.token }}
