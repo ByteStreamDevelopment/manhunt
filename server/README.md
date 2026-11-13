@@ -147,7 +147,7 @@ nano docker-compose.yml     # Netzwerkname "caddy" auf den deines Caddy-Containe
 docker compose up -d --build
 ```
 
-Dann den Block aus `Caddyfile.example` in deine Caddyfile übernehmen und Caddy neu laden (`docker exec <caddy> caddy reload --config /etc/caddy/Caddyfile`). Spielstände und Fotos liegen im Docker-Volume `manhunt-data`.
+Alle Variablen aus der `.env` werden automatisch in den Container übernommen (`env_file`). Dann den Block aus `Caddyfile.example` in deine Caddyfile übernehmen und Caddy neu laden (`docker exec <caddy> caddy reload --config /etc/caddy/Caddyfile`). Spielstände und Fotos liegen im Docker-Volume `manhunt-data`.
 
 ### Variante 2: Ohne Docker (Node.js direkt)
 

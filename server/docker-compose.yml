@@ -3,6 +3,9 @@ services:
     build: .
     container_name: manhunt
     restart: unless-stopped
+    # Alle Einstellungen aus der .env in den Container übernehmen (OPERATOR_*, USER_QUOTA_MB, PHOTO_RETENTION_DAYS, …)
+    env_file:
+      - .env
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Bitte ADMIN_PASSWORD in der .env setzen}
       # Optional: SHA-256-Fingerabdruck der Android-App (android/build.sh gibt ihn aus) für App-Links

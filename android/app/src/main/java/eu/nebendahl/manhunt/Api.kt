@@ -273,6 +273,9 @@ object Api {
 
     fun legalUrl(page: String): String = url("/$page")
 
+    /** Löschfristen in Tagen: (Standorte/Chat, Fotos), 0 = nie */
+    fun retention(): Pair<Int, Int> = json(get("/api/legal")).getJSONObject("retention").let { it.optInt("locationsDays") to it.optInt("photosDays") }
+
     /* ---------------- Melden, offene Runden, Vorlagen ---------------- */
 
     fun reportPhoto(code: String, token: String, photoId: String, reason: String, note: String) {

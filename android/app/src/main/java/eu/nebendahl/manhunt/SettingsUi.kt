@@ -312,9 +312,15 @@ private fun PrivacySection(a: Account) {
     } ?: Text("Lade …", style = MaterialTheme.typography.bodySmall)
     Text("Pflicht-Mails (Bestätigung, Passwort, Sicherheit) bekommst du immer.", style = MaterialTheme.typography.bodySmall)
     Text("Meine Daten", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    // Löschfristen kommen vom Server (vom Betreiber einstellbar)
+    var retention by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    LaunchedEffect(Unit) { runCatching { retention = withContext(Dispatchers.IO) { Api.retention() } } }
     Text(
-        "Alle Daten, die Manhunt zu deinem Konto gespeichert hat, als ZIP mit deinen Fotos (Art. 15 und 20 DSGVO). " +
-            "Standorte, Chat und Fotos beendeter Runden löscht der Server automatisch nach 30 Tagen.",
+        "Alle Daten, die Manhunt zu deinem Konto gespeichert hat, als ZIP mit deinen Fotos (Art. 15 und 20 DSGVO)." +
+            (retention?.let { (loc, photos) ->
+                fun days(d: Int) = if (d > 0) "nach $d Tagen" else "nicht automatisch"
+                " Standorte und Chat beendeter Runden löscht der Server ${days(loc)}, Fotos ${days(photos)}."
+            } ?: ""),
         style = MaterialTheme.typography.bodySmall,
     )
     OutlinedButton(onClick = { downloadFile(ctx, Api.exportUrl(a.token), "Manhunt-Daten-${a.username}.zip") }) { Text("⬇️ Meine Daten herunterladen") }
