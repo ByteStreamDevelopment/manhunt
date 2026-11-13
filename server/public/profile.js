@@ -7,6 +7,49 @@
   const monthName = (k) => { const [y, m] = k.split('-'); return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }); };
   let CAT = { badges: [] };
 
+  /** Konto & Datenschutz: E-Mail-Einstellungen, Daten herunterladen, Passwort ändern, Konto löschen */
+  async function accountCard(acc) {
+    let prefs = null;
+    try { prefs = await api('/api/me/prefs', { acc: acc.token }); } catch { /* egal */ }
+    const boxes = prefs ? Object.entries(prefs.categories).map(([k, label]) => {
+      const i = h('input', { type: 'checkbox', id: `mp_${k}`, checked: !!prefs.mailPrefs[k] });
+      i.addEventListener('change', async () => {
+        try { await api('/api/me/prefs', { method: 'POST', acc: acc.token, body: { mailPrefs: { [k]: i.checked } } }); toast('Gespeichert'); }
+        catch (e) { i.checked = !i.checked; toast(e.message); }
+      });
+      return h('label', { class: 'consent', for: `mp_${k}` }, i, h('span', {}, label));
+    }) : [];
+    const pwOld = h('input', { type: 'password', placeholder: 'Bisheriges Passwort', autocomplete: 'current-password' });
+    const pwNew = h('input', { type: 'password', placeholder: 'Neues Passwort (mind. 8 Zeichen)', autocomplete: 'new-password' });
+    const delPw = h('input', { type: 'password', placeholder: 'Passwort zur Bestätigung', autocomplete: 'current-password' });
+    return card('stack',
+      h('h2', {}, '🔒 Konto & Datenschutz'),
+      h('h3', {}, 'E-Mails'),
+      prefs && !prefs.mailConfigured ? h('p', { class: 'small muted' }, 'Hinweis: Auf diesem Server ist noch kein Mailversand eingerichtet.') : null,
+      ...boxes,
+      h('p', { class: 'small muted' }, 'Pflicht-Mails (Bestätigung, Passwort, Sicherheit) bekommst du immer.'),
+      h('h3', {}, 'Meine Daten'),
+      h('p', { class: 'small' }, 'Lade alle Daten herunter, die Manhunt zu deinem Konto gespeichert hat – als ZIP mit daten.json und deinen Fotos (Art. 15 und 20 DSGVO).'),
+      h('a', { class: 'btn small light', href: `/api/me/export?t=${encodeURIComponent(acc.token)}` }, '⬇️ Meine Daten herunterladen'),
+      h('h3', {}, 'Passwort ändern'),
+      pwOld, pwNew,
+      h('button', { class: 'btn small light', onclick: async () => {
+        try {
+          const r = await api('/api/me/password', { method: 'POST', acc: acc.token, body: { oldPassword: pwOld.value, newPassword: pwNew.value } });
+          account.set({ ...acc, token: r.token }); pwOld.value = ''; pwNew.value = ''; toast('Passwort geändert – andere Geräte sind abgemeldet');
+        } catch (e) { toast(e.message); }
+      } }, 'Passwort ändern'),
+      h('h3', {}, 'Konto löschen'),
+      h('p', { class: 'small' }, 'Löscht dein Konto mit Profil, Profilbild, Vitrine, Freundschaften, Vorlagen sowie deinen Standorten, Fotos und Nachrichten in allen Runden. In Ergebnissen anderer erscheinst du als „Gelöschter Spieler“. Das kann nicht rückgängig gemacht werden.'),
+      delPw,
+      h('button', { class: 'btn small hunter', onclick: async () => {
+        if (!confirm('Konto wirklich endgültig löschen?')) return;
+        try { await api('/api/me/delete', { method: 'POST', acc: acc.token, body: { password: delPw.value } }); account.set(null); localStorage.removeItem('manhunt:admin'); alert('Dein Konto wurde gelöscht.'); location.href = '/'; }
+        catch (e) { toast(e.message); }
+      } }, 'Konto endgültig löschen'),
+      h('p', { class: 'small' }, h('a', { href: '/datenschutz' }, 'Datenschutzerklärung'), ' · ', h('a', { href: '/impressum' }, 'Impressum')));
+  }
+
   async function render() {
     const acc = account.get();
     const u = new URLSearchParams(location.search).get('u') || (acc && acc.username);
@@ -60,6 +103,7 @@
       h('b', {}, `${x.points} P`),
       // Issue #7: vergangene Runde nochmal ansehen (Karte mit Wiederholung, Fotos, ZIP)
       p.self && x.available ? h('a', { class: 'btn small light', href: `/g/${x.code}` }, 'Ansehen') : null))) : h('p', { class: 'muted' }, 'Noch keine Spiele.')));
+    if (p.self) kids.push(await accountCard(acc));
     $('#main').replaceChildren(...kids);
   }
 

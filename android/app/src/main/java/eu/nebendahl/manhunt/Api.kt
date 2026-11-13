@@ -69,8 +69,10 @@ object Api {
 
     /* ---------------- Accounts ---------------- */
 
-    fun register(username: String, email: String, password: String, adminKey: String?): String {
+    /** acceptPrivacy: Datenschutzerklärung gelesen + Mindestalter (Pflicht); mailOptIn: Benachrichtigungs-Mails (freiwillig) */
+    fun register(username: String, email: String, password: String, adminKey: String?, acceptPrivacy: Boolean = true, mailOptIn: Boolean = false): String {
         val b = JSONObject().put("username", username).put("email", email).put("password", password)
+            .put("acceptPrivacy", acceptPrivacy).put("mailOptIn", mailOptIn)
         if (!adminKey.isNullOrBlank()) b.put("adminKey", adminKey)
         return json(post("/api/auth/register", null, b)).optString("email", email)
     }
@@ -258,6 +260,18 @@ object Api {
             .patch(body.toString().toRequestBody(JSON)).build()
         json(req)
     }
+
+    /* ---------------- Datenschutz: E-Mail-Einstellungen, Datenexport ---------------- */
+
+    fun mailPrefs(accountToken: String): MailPrefs = parseMailPrefs(json(get("/api/me/prefs", accountToken)))
+
+    fun setMailPref(accountToken: String, key: String, value: Boolean): MailPrefs =
+        parseMailPrefs(json(post("/api/me/prefs", accountToken, JSONObject().put("mailPrefs", JSONObject().put(key, value)))))
+
+    /** ZIP mit allen eigenen Daten (Art. 15/20 DSGVO) */
+    fun exportUrl(accountToken: String): String = url("/api/me/export?t=" + URLEncoder.encode(accountToken, "UTF-8"))
+
+    fun legalUrl(page: String): String = url("/$page")
 
     /* ---------------- Melden, offene Runden, Vorlagen ---------------- */
 

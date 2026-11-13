@@ -91,6 +91,8 @@ fun AuthScreen() {
     var password by rememberSaveable { mutableStateOf("") }
     var code by rememberSaveable { mutableStateOf("") }
     var adminKey by rememberSaveable { mutableStateOf("") }
+    var acceptPrivacy by rememberSaveable { mutableStateOf(false) }
+    var mailOptIn by rememberSaveable { mutableStateOf(false) }
     var needsAdminKey by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -162,14 +164,22 @@ fun AuthScreen() {
                         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                // Einwilligungen (DSGVO): Datenschutz/Mindestalter Pflicht, Mails freiwillig und nicht vorausgewählt
+                ConsentRow(acceptPrivacy, { acceptPrivacy = it }) {
+                    Text("Ich habe die Datenschutzerklärung gelesen und bin mindestens 16 Jahre alt (oder meine Eltern sind einverstanden).", style = MaterialTheme.typography.bodySmall)
+                }
+                ConsentRow(mailOptIn, { mailOptIn = it }) {
+                    Text("Optional: E-Mails zu Freundschaftsanfragen, Einladungen und Spielergebnissen. Jederzeit abbestellbar.", style = MaterialTheme.typography.bodySmall)
+                }
+                LegalLinks()
                 Button(
                     onClick = {
                         run {
-                            email = io { Api.register(login, email, password, adminKey.ifBlank { null }) }
+                            email = io { Api.register(login, email, password, adminKey.ifBlank { null }, acceptPrivacy, mailOptIn) }
                             mode = AuthMode.Verify; code = ""; info = "Wir haben dir einen 6-stelligen Code an $email geschickt."
                         }
                     },
-                    enabled = !busy && login.length >= 3 && email.contains('@') && password.length >= 8, modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy && login.length >= 3 && email.contains('@') && password.length >= 8 && acceptPrivacy, modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (busy) "Bitte warten …" else "Registrieren") }
                 TextButton(onClick = { mode = AuthMode.Login; error = null }) { Text("Ich habe schon einen Account") }
             }
@@ -205,6 +215,28 @@ fun AuthScreen() {
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (mode != AuthMode.Register) LegalLinks()
+    }
+}
+
+@Composable
+private fun ConsentRow(checked: Boolean, onChange: (Boolean) -> Unit, label: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = onChange)
+        Box(Modifier.weight(1f)) { label() }
+    }
+}
+
+/** Links zu Datenschutzerklärung und Impressum (öffnen im Browser) */
+@Composable
+fun LegalLinks() {
+    val ctx = LocalContext.current
+    fun open(page: String) = runCatching {
+        ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(Api.legalUrl(page))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = { open("datenschutz") }) { Text("Datenschutz") }
+        TextButton(onClick = { open("impressum") }) { Text("Impressum") }
     }
 }
 

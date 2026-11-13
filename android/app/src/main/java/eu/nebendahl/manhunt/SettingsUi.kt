@@ -30,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -149,6 +150,8 @@ fun SettingsScreen(onBack: () -> Unit, openProfile: () -> Unit) {
                     }
                 }
             }
+            // ---------------- Datenschutz ----------------
+            account?.let { a -> item { Section("🔒 Datenschutz") { PrivacySection(a) } } }
             // ---------------- Speicher und Info ----------------
             item {
                 Section("🧹 Speicher") {
@@ -260,8 +263,9 @@ private fun DeleteAccountDialog(onDone: (Boolean) -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Dein Konto, Profilbild, deine Vitrine, Freundschaften und Statistiken werden gelöscht. " +
-                        "In vergangenen Spielen bleibt nur dein Spielername stehen. Das lässt sich nicht rückgängig machen.",
+                    "Dein Konto, Profilbild, deine Vitrine, Freundschaften, Vorlagen und Statistiken sowie deine Standorte, Fotos und " +
+                        "Nachrichten in allen Runden werden gelöscht. In Ergebnissen anderer erscheinst du als „Gelöschter Spieler“. " +
+                        "Tipp: Lade vorher unter „Datenschutz“ deine Daten herunter. Das lässt sich nicht rückgängig machen.",
                 )
                 OutlinedTextField(pw, { pw = it }, label = { Text("Passwort zur Bestätigung") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -282,6 +286,42 @@ private fun DeleteAccountDialog(onDone: (Boolean) -> Unit) {
         },
         dismissButton = { TextButton(onClick = { onDone(false) }) { Text("Abbrechen") } },
     )
+}
+
+/** E-Mail-Einwilligungen, Datenauskunft (ZIP), Rechtstexte */
+@Composable
+private fun PrivacySection(a: Account) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var prefs by remember { mutableStateOf<MailPrefs?>(null) }
+    LaunchedEffect(a.token) { runCatching { prefs = withContext(Dispatchers.IO) { Api.mailPrefs(a.token) } } }
+    Text("E-Mails", fontWeight = FontWeight.Bold)
+    prefs?.let { p ->
+        if (!p.mailConfigured) Text("Auf dem Server ist noch kein Mailversand eingerichtet.", style = MaterialTheme.typography.bodySmall)
+        p.labels.forEach { (k, label) ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Switch(checked = p.values[k] == true, onCheckedChange = { v ->
+                    scope.launch {
+                        try { prefs = withContext(Dispatchers.IO) { Api.setMailPref(a.token, k, v) } }
+                        catch (e: ApiException) { Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
+                    }
+                })
+            }
+        }
+    } ?: Text("Lade …", style = MaterialTheme.typography.bodySmall)
+    Text("Pflicht-Mails (Bestätigung, Passwort, Sicherheit) bekommst du immer.", style = MaterialTheme.typography.bodySmall)
+    Text("Meine Daten", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    Text(
+        "Alle Daten, die Manhunt zu deinem Konto gespeichert hat, als ZIP mit deinen Fotos (Art. 15 und 20 DSGVO). " +
+            "Standorte, Chat und Fotos beendeter Runden löscht der Server automatisch nach 30 Tagen.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    OutlinedButton(onClick = { downloadFile(ctx, Api.exportUrl(a.token), "Manhunt-Daten-${a.username}.zip") }) { Text("⬇️ Meine Daten herunterladen") }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = { open(ctx, Api.legalUrl("datenschutz")) }) { Text("Datenschutzerklärung") }
+        TextButton(onClick = { open(ctx, Api.legalUrl("impressum")) }) { Text("Impressum") }
+    }
 }
 
 private fun open(ctx: android.content.Context, url: String) {

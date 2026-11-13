@@ -38,7 +38,7 @@ async function api(p, { method, body, token, acc, headers = {}, raw } = {}) {
 }
 const code = (email) => { const t = LOG.split(`Mail an ${email}`); return t[t.length - 1].match(/\b(\d{6})\b/)[1]; };
 async function account(name, adminKey) {
-  await api('/api/auth/register', { body: { username: name, email: `${name.toLowerCase()}@x.de`, password: 'geheim123', adminKey } });
+  await api('/api/auth/register', { body: { username: name, email: `${name.toLowerCase()}@x.de`, password: 'geheim123', adminKey, acceptPrivacy: true } });
   await sleep(100);
   return api('/api/auth/verify', { body: { login: name, code: code(`${name.toLowerCase()}@x.de`) } });
 }

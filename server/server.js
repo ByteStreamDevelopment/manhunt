@@ -15,6 +15,7 @@ const { ZipWriter, safeName } = require('./lib/zip');
 const { haversine, offset, randomPointAround, fetchPois } = require('./lib/geo');
 const { detectVpn, checkSpoof } = require('./lib/anticheat');
 const smtp = require('./lib/smtp');
+const { createMailer } = require('./lib/mail');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -53,6 +54,11 @@ const MAX_GAME_HOURS = Math.max(1, Number(process.env.MAX_GAME_HOURS) || 24);
 /** Fotos und Sprachnachrichten beendeter Runden werden nach so vielen Tagen gelöscht (0 = nie). Galerie und Vitrine bleiben. */
 const PHOTO_RETENTION_DAYS = Number(process.env.PHOTO_RETENTION_DAYS ?? 30);
 const MAX_COHOSTS = 5;
+/** Unbestätigte Konten nach so vielen Tagen löschen (Datensparsamkeit) */
+const UNVERIFIED_DAYS = Number(process.env.UNVERIFIED_DAYS ?? 7);
+/** Version der Datenschutzerklärung – bei wesentlichen Änderungen hochzählen (Nachweis der Kenntnisnahme) */
+const PRIVACY_VERSION = '2026-11-13';
+const PUBLIC_URL = process.env.PUBLIC_URL || 'https://manhunt.nebendahl.eu';
 const MAX_TEMPLATES = 20;
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
@@ -287,23 +293,49 @@ function applyRetention() {
   // Fotos/Sprachnachrichten beendeter Runden nach PHOTO_RETENTION_DAYS löschen (gibt Speicher frei)
   if (PHOTO_RETENTION_DAYS > 0) {
     const pcut = Date.now() - PHOTO_RETENTION_DAYS * 864e5;
+    // 3 Tage vorher Bescheid geben (wer Fotos hat, kann sie noch als ZIP sichern)
+    const noticeDays = PHOTO_RETENTION_DAYS >= 6 ? 3 : 0;
+    if (noticeDays) {
+      const ncut = pcut + noticeDays * 864e5;
+      for (const g of Object.values(db.games)) {
+        if (g.status !== 'ended' || !g.endedAt || g.endedAt >= ncut || g.endedAt < pcut || !g.photos.length || g.expiryNoticeAt) continue;
+        g.expiryNoticeAt = Date.now(); save();
+        const ids = new Set(Object.values(g.players).map((p) => p.accountId).filter(Boolean));
+        if (g.ownerId) ids.add(g.ownerId);
+        const days = Math.max(1, Math.ceil((g.endedAt - pcut) / 864e5));
+        for (const id of ids) mailer.send(db.accounts[id], 'photosExpiring', { gameName: g.name, code: g.code, count: g.photos.length, days, retention: PHOTO_RETENTION_DAYS }).catch(() => {});
+      }
+    }
     for (const g of Object.values(db.games)) {
       if (g.status === 'ended' && g.endedAt && g.endedAt < pcut && (g.photos.length || g.chat.some((c) => c.voice))) {
         purgeGameMedia(g); g.photosExpiredAt = Date.now(); save();
       }
     }
   }
+  // Unbestätigte Konten (nie bestätigte Registrierungen) nach UNVERIFIED_DAYS löschen
+  if (UNVERIFIED_DAYS > 0) {
+    const ucut = Date.now() - UNVERIFIED_DAYS * 864e5;
+    for (const a of Object.values(db.accounts)) if (!a.verified && a.createdAt < ucut && !isAdminAccount(a)) { delete db.accounts[a.id]; save(); }
+  }
+  // Meldungen: erledigte nach 90, alle nach 180 Tagen löschen
+  const before = (db.reports || []).length;
+  db.reports = (db.reports || []).filter((r) => (r.resolved ? r.resolved > Date.now() - 90 * 864e5 : r.ts > Date.now() - 180 * 864e5));
+  if (db.reports.length !== before) save();
   if (!(RETENTION_DAYS > 0)) return;
   const cutoff = Date.now() - RETENTION_DAYS * 864e5;
   for (const g of Object.values(db.games)) {
-    if (g.status === 'ended' && g.endedAt && g.endedAt < cutoff && g.locations.length) {
+    if (g.status === 'ended' && g.endedAt && g.endedAt < cutoff && (g.locations.length || g.chat.length || !g.retentionDone)) {
+      // Standorte, Chat, Meldungen und private Nachrichten beendeter Runden löschen; Ergebnis und Punkte bleiben
       clearLocations(g);
-      for (const p of Object.values(g.players)) p.lastLoc = null;
+      g.chat = []; g.messages = g.messages.filter((m) => m.kind === 'system' && /^Spiel beendet/.test(m.text)); g.effects = []; g.pickups = [];
+      for (const p of Object.values(g.players)) { p.lastLoc = null; p.inbox = []; p.flags = {}; }
+      deleteVoiceFiles(g.code);
+      g.retentionDone = Date.now();
       save();
     }
   }
 }
-applyRetention();
+setImmediate(applyRetention); // erst nach dem Laden aller Module (nutzt spätere Helfer)
 setInterval(applyRetention, 3600e3).unref();
 
 /* ------------------------------------------------------------------ */
@@ -312,6 +344,9 @@ setInterval(applyRetention, 3600e3).unref();
 class HttpError extends Error { constructor(status, message, data) { super(message); this.status = status; this.data = data; } }
 const rid = (n = 8) => crypto.randomBytes(n).toString('hex');
 const hmac = (s) => crypto.createHmac('sha256', db.secret + '|' + ADMIN_PASSWORD).update(s).digest('hex');
+// Abmelde-Links in Mails dürfen nicht ungültig werden, wenn sich ADMIN_PASSWORD ändert -> nur db.secret
+const mailer = createMailer({ smtp, publicUrl: PUBLIC_URL, sign: (x) => crypto.createHmac('sha256', db.secret).update(x).digest('hex'), getDb: () => db, save: () => save() });
+const berlinTime = (ts = Date.now()) => new Date(ts).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'long', timeStyle: 'short' }) + ' Uhr';
 function safeEq(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
@@ -440,11 +475,7 @@ async function sendCode(a, purpose) {
   const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
   a.code = { hash: hmac(`code|${a.id}|${code}`), exp: Date.now() + 30 * 60000, purpose, tries: 0 };
   save();
-  const subject = purpose === 'reset' ? 'Manhunt: Passwort zurücksetzen' : 'Manhunt: Bestätige deine E-Mail-Adresse';
-  const text = purpose === 'reset'
-    ? `Hallo ${a.username},\n\ndein Code zum Zurücksetzen des Passworts lautet:\n\n    ${code}\n\nEr ist 30 Minuten gültig. Wenn du das nicht warst, ignoriere diese Mail.\n`
-    : `Hallo ${a.username},\n\nwillkommen bei Manhunt! Dein Bestätigungscode lautet:\n\n    ${code}\n\nGib ihn in der App oder auf der Website ein. Er ist 30 Minuten gültig.\n`;
-  try { await smtp.sendMail({ to: a.email, subject, text }); }
+  try { await mailer.send(a, purpose === 'reset' ? 'reset' : 'verify', { code, username: a.username }); }
   catch (e) { console.error(`[manhunt] Mail an ${a.email} fehlgeschlagen: ${e.message}`); throw new HttpError(502, 'Die E-Mail konnte nicht verschickt werden. Bitte später erneut versuchen.'); }
 }
 function checkCode(a, code, purpose) {
@@ -465,6 +496,8 @@ async function handleAuth(req, res, p) {
     if (!USERNAME_RE.test(username)) throw new HttpError(400, 'Benutzername: 3–20 Zeichen, nur Buchstaben, Zahlen, _ . -');
     if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Bitte eine gültige E-Mail-Adresse eingeben');
     if (pw.length < 8) throw new HttpError(400, 'Das Passwort muss mindestens 8 Zeichen haben');
+    // Kenntnisnahme der Datenschutzerklärung und Mindestalter (Art. 8 DSGVO: 16 Jahre) bestätigen
+    if (b.acceptPrivacy !== true) throw new HttpError(400, 'Bitte bestätige, dass du die Datenschutzerklärung gelesen hast und mindestens 16 Jahre alt bist (oder deine Eltern einverstanden sind).', { needsConsent: true });
     if (findAccount(username)) throw new HttpError(409, 'Dieser Benutzername ist schon vergeben');
     if (findAccount(email)) throw new HttpError(409, 'Für diese E-Mail gibt es schon einen Account');
     // Admin-Namen sind reserviert: nur mit dem Server-Admin-Passwort registrierbar
@@ -472,7 +505,12 @@ async function handleAuth(req, res, p) {
       throw new HttpError(403, 'Dieser Name ist für die Spielleitung reserviert.', { needsAdminKey: true });
     }
     const salt = rid(16);
-    const a = { id: rid(6), username, email, salt, hash: hashPassword(pw, salt), verified: false, createdAt: Date.now(), tokenVersion: 0, stats: emptyStats(), code: null };
+    const a = {
+      id: rid(6), username, email, salt, hash: hashPassword(pw, salt), verified: false, createdAt: Date.now(), tokenVersion: 0, stats: emptyStats(), code: null,
+      consents: { privacy: { at: Date.now(), version: PRIVACY_VERSION } },
+      // Benachrichtigungs-Mails nur mit ausdrücklicher Einwilligung (Häkchen ist nicht vorausgewählt)
+      mailPrefs: { friends: b.mailOptIn === true, invites: b.mailOptIn === true, games: b.mailOptIn === true, account: true }, mailPrefsAt: Date.now(),
+    };
     db.accounts[a.id] = a; save();
     await sendCode(a, 'verify');
     return sendJSON(res, 201, { ok: true, needsVerification: true, email: a.email, mailConfigured: smtp.enabled() });
@@ -482,7 +520,10 @@ async function handleAuth(req, res, p) {
     const b = await readJSON(req);
     const a = findAccount(b.login || b.email);
     if (!a) throw new HttpError(404, 'Account nicht gefunden');
-    if (!a.verified) { checkCode(a, b.code, 'verify'); a.verified = true; save(); }
+    if (!a.verified) {
+      checkCode(a, b.code, 'verify'); a.verified = true; save();
+      mailer.send(a, 'welcome', { username: a.username, optedIn: !!a.mailPrefs?.friends }).catch(() => {});
+    }
     return sendJSON(res, 200, loginResponse(a));
   }
   if (p === '/api/auth/resend' && m === 'POST') {
@@ -515,12 +556,13 @@ async function handleAuth(req, res, p) {
     if (String(b.password || '').length < 8) throw new HttpError(400, 'Das Passwort muss mindestens 8 Zeichen haben');
     checkCode(a, b.code, 'reset');
     a.salt = rid(16); a.hash = hashPassword(b.password, a.salt); a.verified = true; a.tokenVersion = (a.tokenVersion || 0) + 1; save();
+    mailer.send(a, 'passwordChanged', { username: a.username, when: berlinTime() }).catch(() => {});
     return sendJSON(res, 200, loginResponse(a));
   }
   if (p === '/api/auth/me' && m === 'GET') {
     const a = accountFromToken(req.headers['x-account'] || req.headers['x-token']);
     if (!a) throw new HttpError(401, 'Nicht angemeldet');
-    return sendJSON(res, 200, { account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken(a.username) : undefined });
+    return sendJSON(res, 200, { account: publicAccount(a), adminToken: isAdminAccount(a) ? makeAdminToken(a.username) : undefined, mailPrefs: mailer.prefs(a) });
   }
   throw new HttpError(404, 'Nicht gefunden');
 }
@@ -659,6 +701,14 @@ function endGame(g, reason, winner = null) {
     }
   }
   social.recordGame(g, winner);
+  for (const p of Object.values(g.players)) {
+    if (!isPlaying(p) || !p.accountId) continue;
+    const won = (winner === 'hunters' && p.role === 'hunter') || (winner === 'runners' && p.role === 'runner' && !p.caught);
+    mailer.send(db.accounts[p.accountId], 'gameResult', {
+      gameName: g.name, code: g.code, reason, won, points: p.points || 0, catches: p.gameCatches || 0,
+      role: p.converted ? 'Runner (dann Hunter)' : p.role === 'runner' ? 'Runner' : 'Hunter', photoDays: g.photos.length && PHOTO_RETENTION_DAYS > 0 ? PHOTO_RETENTION_DAYS : 0,
+    }).catch(() => {});
+  }
 }
 function resetGame(g) {
   g.status = 'lobby'; g.startedAt = null; g.endedAt = null;
@@ -1454,6 +1504,92 @@ function myPhotos(a) {
   }
   return out.sort((x, y) => y.ts - x.ts);
 }
+/**
+ * Konto mit allen personenbezogenen Daten löschen (Art. 17 DSGVO).
+ * In Runden anderer bleibt nur ein anonymer Platzhalter, damit deren Ergebnisse stimmen.
+ */
+async function deleteAccountData(a) {
+  await fsp.unlink(path.join(AVATAR_DIR, `${a.id}.jpg`)).catch(() => {});
+  for (const x of a.showcase || []) await fsp.unlink(path.join(SHOWCASE_DIR, `${x.id}.jpg`)).catch(() => {});
+  for (const o of Object.values(db.accounts)) {
+    for (const k of ['friends', 'friendIn', 'friendOut']) if (o[k]) o[k] = o[k].filter((id) => id !== a.id);
+    if (o.invites) o.invites = o.invites.filter((i) => i.from !== a.id);
+  }
+  releaseOwnedGames(a);
+  for (const g of Object.values(db.games)) {
+    g.banned = (g.banned || []).filter((id) => id !== a.id);
+    for (const pl of Object.values(g.players)) {
+      if (pl.accountId !== a.id) continue;
+      // Standorte, Fotos, Chat und Sprachnachrichten dieses Spielers löschen, Namen anonymisieren
+      clearLocations(g, pl.id);
+      for (const ph of g.photos.filter((x) => x.pid === pl.id)) await fsp.unlink(path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`)).catch(() => {});
+      g.photos = g.photos.filter((x) => x.pid !== pl.id);
+      for (const c of g.chat.filter((x) => x.pid === pl.id && x.voice)) await fsp.unlink(path.join(VOICE_DIR, `${g.code}_${c.voice.id}.${c.voice.ext}`)).catch(() => {});
+      g.chat = g.chat.filter((x) => x.pid !== pl.id);
+      for (const ph of g.photos) if (ph.reactions) delete ph.reactions[pl.id];
+      const old = pl.name;
+      pl.name = 'Gelöschter Spieler'; pl.accountId = null; pl.lastLoc = null; pl.inbox = []; pl.flags = {}; pl.token = rid(18);
+      g.messages = g.messages.map((m) => (old && m.text.includes(old) ? { ...m, text: m.text.split(old).join('Gelöschter Spieler') } : m));
+      notify(g.code);
+    }
+  }
+  // Galerie-Fotos dieses Kontos (mit Namen) entfernen, eigene Meldungen löschen
+  for (const x of db.gallery.filter((y) => y.accountId === a.id)) await fsp.unlink(path.join(GALLERY_DIR, `${x.id}.jpg`)).catch(() => {});
+  db.gallery = db.gallery.filter((y) => y.accountId !== a.id);
+  db.reports = (db.reports || []).filter((r) => r.by !== a.id && r.targetAccountId !== a.id);
+  delete db.accounts[a.id];
+}
+
+/** Datenauskunft (Art. 15/20 DSGVO): alles zu einem Konto als ZIP mit data.json und eigenen Fotos */
+async function exportAccount(a, res) {
+  const games = [];
+  const files = [];
+  for (const g of Object.values(db.games)) {
+    const mine = Object.values(g.players).filter((p) => p.accountId === a.id);
+    const owned = g.ownerId === a.id, cohost = (g.cohosts || []).includes(a.id);
+    if (!mine.length && !owned && !cohost) continue;
+    const pids = new Set(mine.map((p) => p.id));
+    games.push({
+      code: g.code, name: g.name, status: g.status, createdAt: g.createdAt, startedAt: g.startedAt, endedAt: g.endedAt,
+      youCreated: owned, youCohost: cohost,
+      you: mine.map((p) => ({ name: p.name, role: p.role, points: p.points, caught: p.caught, caughtAt: p.caughtAt, joinedAt: p.joinedAt, converted: !!p.converted })),
+      yourLocations: g.locations.filter((l) => pids.has(l.pid)).map(({ lat, lng, acc, ts }) => ({ lat, lng, acc, ts })),
+      yourPhotos: g.photos.filter((ph) => pids.has(ph.pid)).map((ph) => ({ id: ph.id, ts: ph.ts, quest: ph.quest, file: `fotos/${g.code}_${ph.id}.jpg` })),
+      yourChat: g.chat.filter((c) => pids.has(c.pid)).map(({ ts, channel, text, voice }) => ({ ts, channel, text, voice: voice ? `sprachnachricht (${voice.dur} s)` : null })),
+      settings: owned ? g.settings : undefined,
+    });
+    for (const ph of g.photos.filter((x) => pids.has(x.pid))) files.push([`fotos/${g.code}_${ph.id}.jpg`, path.join(PHOTO_DIR, `${g.code}_${ph.id}.jpg`), ph.ts]);
+  }
+  const name = (id) => db.accounts[id]?.username || null;
+  const data = {
+    exportedAt: new Date().toISOString(),
+    hinweis: 'Alle Daten, die Manhunt zu deinem Konto gespeichert hat (Art. 15 und 20 DSGVO). Passwort nur als Hash gespeichert und hier nicht enthalten.',
+    account: {
+      id: a.id, username: a.username, email: a.email, verified: !!a.verified, createdAt: a.createdAt, isAdmin: isAdminAccount(a),
+      consents: a.consents || null, mailPrefs: mailer.prefs(a), mailPrefsChangedAt: a.mailPrefsAt || null,
+      quotaMb: a.quotaMb || null, storage: storageInfo(a),
+    },
+    stats: a.stats, badges: a.badges || {}, seasons: a.seasons || {}, history: a.history || [],
+    friends: (a.friends || []).map(name).filter(Boolean), friendRequestsIn: (a.friendIn || []).map(name).filter(Boolean), friendRequestsOut: (a.friendOut || []).map(name).filter(Boolean),
+    invites: (a.invites || []).map(({ fromName, code, gameName, ts }) => ({ from: fromName, code, gameName, ts })),
+    pushDevices: (a.push || []).length,
+    templates: (a.templates || []).map(({ name: n, settings, createdAt }) => ({ name: n, createdAt, settings })),
+    showcase: (a.showcase || []).map(({ id, gameName, ts, caption, quest }) => ({ gameName, ts, caption, quest, file: `vitrine/${id}.jpg` })),
+    gallery: db.gallery.filter((x) => x.accountId === a.id).map(({ id, gameName, ts, caption, featuredAt }) => ({ gameName, ts, caption, featuredAt, file: `galerie/${id}.jpg` })),
+    reportsYouMade: (db.reports || []).filter((r) => r.by === a.id).map(({ ts, kind, gameName, reason, note, targetName, resolved }) => ({ ts, kind, gameName, reason, note, about: targetName, resolved })),
+    games,
+  };
+  for (const x of a.showcase || []) files.push([`vitrine/${x.id}.jpg`, path.join(SHOWCASE_DIR, `${x.id}.jpg`), x.ts]);
+  for (const x of db.gallery.filter((y) => y.accountId === a.id)) files.push([`galerie/${x.id}.jpg`, path.join(GALLERY_DIR, `${x.id}.jpg`), x.ts]);
+  if (a.avatar) files.push(['profilbild.jpg', path.join(AVATAR_DIR, `${a.id}.jpg`), a.avatar]);
+  const day = new Date().toISOString().slice(0, 10);
+  res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="manhunt-daten-${safeName(a.username)}-${day}.zip"` });
+  const zip = new ZipWriter(res);
+  await zip.add('daten.json', Buffer.from(JSON.stringify(data, null, 2), 'utf8'), Date.now());
+  for (const [n, f, ts] of files) { const buf = await fsp.readFile(f).catch(() => null); if (buf) await zip.add(n, buf, ts || Date.now()); }
+  await zip.finish();
+}
+
 async function handleMe(req, res, url) {
   const m = req.method, p = url.pathname;
   // Öffentlich: Profilbild und ausgestellte Fotos
@@ -1473,7 +1609,7 @@ async function handleMe(req, res, url) {
     return res.end(data);
   }
   // Konto-Token oder Admin-Token mit Namen (Website /admin)
-  const tok = req.headers['x-account'] || req.headers['x-token'];
+  const tok = req.headers['x-account'] || req.headers['x-token'] || (p === '/api/me/export' ? url.searchParams.get('t') : null);
   const a = accountFromToken(tok) || (checkAdminToken(tok)?.username ? findAccount(checkAdminToken(tok).username) : null);
   if (!a) throw new HttpError(401, 'Bitte melde dich an');
   if (p === '/api/me/avatar' && m === 'POST') {
@@ -1490,6 +1626,11 @@ async function handleMe(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
   if (p === '/api/me/photos' && m === 'GET') return sendJSON(res, 200, { photos: myPhotos(a) });
+  // Datenauskunft als ZIP (Art. 15/20 DSGVO)
+  if (p === '/api/me/export' && m === 'GET') { rateLimit(req, 'export', 10, 3600e3); return exportAccount(a, res); }
+  // E-Mail-Einstellungen (Einwilligungen, jederzeit widerrufbar)
+  if (p === '/api/me/prefs' && m === 'GET') return sendJSON(res, 200, { mailPrefs: mailer.prefs(a), categories: Object.fromEntries(Object.entries(mailer.CATEGORIES).map(([k, c]) => [k, c.label])), mailConfigured: smtp.enabled() });
+  if (p === '/api/me/prefs' && m === 'POST') { const b = await readJSON(req); return sendJSON(res, 200, { mailPrefs: mailer.setPrefs(a, b.mailPrefs || b) }); }
   // Vorlagen: eigene Regelwerke speichern und für neue Runden wiederverwenden
   if (p === '/api/me/templates' && m === 'GET') return sendJSON(res, 200, { templates: (a.templates || []).map(({ id, name, createdAt }) => ({ id, name, createdAt })) });
   if (p === '/api/me/templates' && m === 'POST') {
@@ -1520,19 +1661,8 @@ async function handleMe(req, res, url) {
     const b = await readJSON(req);
     if (!safeEq(a.hash, hashPassword(b.password || '', a.salt))) throw new HttpError(401, 'Falsches Passwort');
     if (isAdminAccount(a)) throw new HttpError(409, 'Admin-Konten können nicht in der App gelöscht werden');
-    await fsp.unlink(path.join(AVATAR_DIR, `${a.id}.jpg`)).catch(() => {});
-    for (const x of a.showcase || []) await fsp.unlink(path.join(SHOWCASE_DIR, `${x.id}.jpg`)).catch(() => {});
-    // Freundschaften und Einladungen bei anderen entfernen
-    for (const o of Object.values(db.accounts)) {
-      for (const k of ['friends', 'friendIn', 'friendOut']) if (o[k]) o[k] = o[k].filter((id) => id !== a.id);
-      if (o.invites) o.invites = o.invites.filter((i) => i.from !== a.id);
-    }
-    // In Spielen bleibt der Spielername stehen, die Verbindung zum Konto wird getrennt
-    for (const g of Object.values(db.games)) for (const pl of Object.values(g.players)) if (pl.accountId === a.id) pl.accountId = null;
-    releaseOwnedGames(a);
-    // Galerie-Einträge bleiben (von der Spielleitung ausgewählt), aber ohne Kontoverknüpfung
-    for (const x of db.gallery) if (x.accountId === a.id) x.accountId = null;
-    delete db.accounts[a.id];
+    await mailer.send(a, 'accountDeleted', { username: a.username }).catch(() => {});
+    await deleteAccountData(a);
     save();
     return sendJSON(res, 200, { ok: true });
   }
@@ -1543,6 +1673,7 @@ async function handleMe(req, res, url) {
     if (!safeEq(a.hash, hashPassword(b.oldPassword || '', a.salt))) throw new HttpError(401, 'Das bisherige Passwort stimmt nicht');
     if (String(b.newPassword || '').length < 8) throw new HttpError(400, 'Das neue Passwort muss mindestens 8 Zeichen haben');
     a.salt = rid(16); a.hash = hashPassword(b.newPassword, a.salt); a.tokenVersion = (a.tokenVersion || 0) + 1; save();
+    mailer.send(a, 'passwordChanged', { username: a.username, when: berlinTime() }).catch(() => {});
     return sendJSON(res, 200, loginResponse(a)); // neues Token, alte Anmeldungen auf anderen Geräten werden ungültig
   }
   if (p === '/api/me/showcase' && m === 'POST') {
@@ -1569,7 +1700,26 @@ async function handleMe(req, res, url) {
   throw new HttpError(404, 'Nicht gefunden');
 }
 
+/** Ein-Klick-Abmeldung aus Mails: GET zeigt eine Bestätigungsseite (Link-Scanner lösen nichts aus), POST meldet ab (RFC 8058) */
+async function handleUnsubscribe(req, res, url) {
+  const u = url.searchParams.get('u') || '', c = url.searchParams.get('c') || '', sig = url.searchParams.get('s') || '';
+  const a = mailer.checkUnsub(u, c, sig);
+  const page = (title, body) => {
+    res.writeHead(a ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><link rel="stylesheet" href="/style.css"></head><body><main class="wrap"><div class="card stack"><h1>${title}</h1>${body}<p><a href="/">Zur Startseite</a> · <a href="/profile">E-Mail-Einstellungen</a></p></div></main></body></html>`);
+  };
+  if (!a) return page('Link ungültig', '<p>Dieser Abmeldelink ist ungültig oder das Konto existiert nicht mehr.</p>');
+  const what = c === 'all' ? 'alle Benachrichtigungs-Mails' : `Mails zu „${mailer.CATEGORIES[c].label}“`;
+  if (req.method === 'POST') {
+    mailer.unsubscribe(a, c);
+    return page('Abgemeldet', `<p>Du bekommst keine ${what.replace(/^alle /, '')} mehr. Pflicht-Mails (z. B. Passwort zurücksetzen) kommen weiterhin.</p>`);
+  }
+  const action = `/api/mail/unsubscribe?u=${encodeURIComponent(u)}&c=${encodeURIComponent(c)}&s=${encodeURIComponent(sig)}`;
+  return page('Mails abbestellen', `<p>Möchtest du ${what} abbestellen?</p><form method="post" action="${action}"><button class="btn" type="submit">Ja, abbestellen</button></form>`);
+}
+
 const social = createSocial({
+  mail: (accountId, type, data) => mailer.send(db.accounts[accountId], type, data).catch(() => {}),
   getDb: () => db, save, HttpError, readJSON, sendJSON, accountFromToken, findAccount, isAdminAccount, rateLimit,
 });
 
@@ -1577,6 +1727,17 @@ async function handleApi(req, res, url) {
   const m = req.method, p = url.pathname;
   if (m === 'GET' && p === '/api/health') return sendJSON(res, 200, { ok: true });
   if (m === 'GET' && p === '/api/catalog') return sendJSON(res, 200, catalogForClients());
+  if (p === '/api/mail/unsubscribe') return handleUnsubscribe(req, res, url);
+  // Angaben für Impressum und Datenschutzerklärung (vom Betreiber per Umgebungsvariablen gesetzt)
+  if (m === 'GET' && p === '/api/legal') {
+    return sendJSON(res, 200, {
+      operator: { name: process.env.OPERATOR_NAME || '', address: process.env.OPERATOR_ADDRESS || '', email: process.env.OPERATOR_EMAIL || '', phone: process.env.OPERATOR_PHONE || '' },
+      privacyVersion: PRIVACY_VERSION, publicUrl: PUBLIC_URL,
+      retention: { locationsDays: RETENTION_DAYS, photosDays: PHOTO_RETENTION_DAYS, unverifiedDays: UNVERIFIED_DAYS, reportsDays: 180 },
+      mailConfigured: smtp.enabled(), vpnCheck: process.env.VPN_CHECK === 'ipapi', tileServer: 'tile.openstreetmap.org',
+      quotaMb: USER_QUOTA_MB,
+    });
+  }
   if (p.startsWith('/api/auth/')) return handleAuth(req, res, p);
   if (p === '/api/seasons' || p.startsWith('/api/profile/') || p.startsWith('/api/friends') || p.startsWith('/api/push/')) return social.handle(req, res, url);
 
@@ -1730,6 +1891,7 @@ function quotaCheck(g) {
   if (o.quotaWarned) return;
   o.quotaWarned = Date.now();
   social.notifyAccount(o.id, { title: '💾 Speicher fast voll', body: `Deine Runden belegen ${fmtMb(used)} von ${fmtMb(quota)}. Lösche alte Runden oder deren Fotos.`, url: '/admin', tag: 'quota' });
+  mailer.send(o, 'quotaWarning', { used, quota }).catch(() => {});
 }
 /** Speicher voll: Spielleitung und Spieler einmal pro Runde informieren */
 function quotaFull(g) {
@@ -1738,6 +1900,7 @@ function quotaFull(g) {
   const o = ownerOf(g);
   pushMsg(g, '💾 Der Speicherplatz der Spielleitung ist voll. Fotos zählen weiter, werden aber nicht mehr gespeichert.');
   if (o) social.notifyAccount(o.id, { title: '💾 Speicher voll', body: `In „${g.name}“ werden keine Fotos mehr gespeichert. Lösche alte Runden oder deren Fotos.`, url: '/admin', tag: 'quota', urgent: true });
+  if (o) mailer.send(o, 'quotaFull', { gameName: g.name, code: g.code }).catch(() => {});
 }
 function adminSummary(g, mgr = null) {
   const ps = Object.values(g.players);
@@ -1884,8 +2047,8 @@ async function handleAdmin(req, res, url) {
     if (!a) throw new HttpError(404, 'Account nicht gefunden');
     if (!am[2] && m === 'DELETE') {
       if (isAdminAccount(a)) throw new HttpError(409, 'Admin-Accounts können nicht gelöscht werden');
-      releaseOwnedGames(a);
-      delete db.accounts[a.id]; save(); return sendJSON(res, 200, { ok: true });
+      await deleteAccountData(a);
+      save(); return sendJSON(res, 200, { ok: true });
     }
     if (am[2] === 'verify' && m === 'POST') { a.verified = true; a.code = null; save(); return sendJSON(res, 200, publicAccount(a)); }
     if (am[2] === 'resetstats' && m === 'POST') { a.stats = emptyStats(); save(); return sendJSON(res, 200, publicAccount(a)); }
@@ -1984,6 +2147,7 @@ async function handleAdmin(req, res, url) {
         if (g.cohosts.length >= MAX_COHOSTS) throw new HttpError(409, `Höchstens ${MAX_COHOSTS} Mit-Spielleiter`);
         g.cohosts.push(a.id);
         social.notifyAccount(a.id, { title: '🎮 Mit-Spielleitung', body: `${mgr.name || 'Die Spielleitung'} hat dich zur Mit-Spielleitung von „${g.name}“ gemacht.`, url: '/admin', tag: 'cohost' });
+        mailer.send(a, 'cohostAdded', { from: mgr.name || 'Die Spielleitung', gameName: g.name, code: g.code }).catch(() => {});
       }
     }
     else if (act === 'give') {
@@ -2400,9 +2564,9 @@ const MIME = {
 };
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' https://unpkg.com",
-  "style-src 'self' 'unsafe-inline' https://unpkg.com",
-  "img-src 'self' data: blob: https://unpkg.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -2428,6 +2592,8 @@ async function serveStatic(req, res, url) {
   else if (p === '/gallery' || p === '/galerie') p = '/gallery.html';
   else if (p === '/leaderboard' || p === '/bestenliste') p = '/leaderboard.html';
   else if (p === '/profile' || p === '/profil') p = '/profile.html';
+  else if (p === '/datenschutz' || p === '/privacy') p = '/datenschutz.html';
+  else if (p === '/impressum' || p === '/imprint') p = '/impressum.html';
   else if (/^\/g\/[A-Za-z0-9]+\/?$/.test(p)) p = '/game.html';
   const file = path.normalize(path.join(PUBLIC_DIR, p));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) throw new HttpError(403, 'Verboten');

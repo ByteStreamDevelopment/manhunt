@@ -54,4 +54,13 @@ class HostingTest {
         assertEquals(2, g.openReports)
         assertTrue(g.publicListed)
     }
+
+    @Test fun mailPrefs() {
+        val p = parseMailPrefs(res("mail_prefs.json"))
+        assertEquals(listOf("friends", "invites", "games", "account"), p.labels.keys.toList())
+        assertTrue(p.values["friends"]!!)
+        assertFalse(p.values["invites"]!!)
+        assertFalse(p.mailConfigured)
+        assertEquals("Ergebnis nach jeder Runde", p.labels["games"])
+    }
 }

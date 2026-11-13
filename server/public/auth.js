@@ -43,15 +43,22 @@ window.MHAuth = (() => {
       const mail = field('E-Mail', { type: 'email', autocomplete: 'email' });
       const pw = field('Passwort (mind. 8 Zeichen)', { type: 'password', autocomplete: 'new-password' });
       const key = field('Admin-Schlüssel', { type: 'password' }); key.el.hidden = true;
+      // Einwilligungen: Datenschutz/Alter Pflicht, Mails freiwillig (nicht vorausgewählt)
+      const privacy = h('input', { type: 'checkbox', id: 'regPrivacy' });
+      const optin = h('input', { type: 'checkbox', id: 'regMail' });
+      const consent = h('div', { class: 'stack' },
+        h('label', { class: 'consent', for: 'regPrivacy' }, privacy, h('span', {}, 'Ich habe die ', h('a', { href: '/datenschutz', target: '_blank' }, 'Datenschutzerklärung'), ' gelesen und bin mindestens 16 Jahre alt (oder meine Eltern sind einverstanden).')),
+        h('label', { class: 'consent', for: 'regMail' }, optin, h('span', {}, 'Optional: Schickt mir E-Mails zu Freundschaftsanfragen, Einladungen und Spielergebnissen. Jederzeit abbestellbar.')));
       const e = err();
       const go = async () => {
         e.textContent = '';
         try {
-          const r = await api('/api/auth/register', { method: 'POST', body: { username: user.i.value, email: mail.i.value, password: pw.i.value, adminKey: key.i.value || undefined } });
+          if (!privacy.checked) { e.textContent = 'Bitte bestätige die Datenschutzerklärung und das Mindestalter.'; return; }
+          const r = await api('/api/auth/register', { method: 'POST', body: { username: user.i.value, email: mail.i.value, password: pw.i.value, adminKey: key.i.value || undefined, acceptPrivacy: true, mailOptIn: optin.checked } });
           showVerify(r.email, 'Wir haben dir einen 6-stelligen Code geschickt.');
         } catch (x) { e.textContent = x.message; if (x.data && x.data.needsAdminKey) key.el.hidden = false; }
       };
-      root.replaceChildren(h('h2', {}, 'Account anlegen'), user.el, mail.el, pw.el, key.el, e,
+      root.replaceChildren(h('h2', {}, 'Account anlegen'), user.el, mail.el, pw.el, key.el, consent, e,
         h('button', { class: 'btn big', onclick: go }, 'Registrieren'),
         h('button', { class: 'btn small light', onclick: () => showLogin() }, 'Ich habe schon einen Account'));
     }
