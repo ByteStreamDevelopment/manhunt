@@ -19,6 +19,7 @@ const ONLINE_MS = 5 * 60000;
 
 function createSocial(ctx) {
   const { getDb, save, HttpError, readJSON, sendJSON, accountFromToken, findAccount, isAdminAccount, rateLimit } = ctx;
+  const mail = ctx.mail || (() => {});
   const PUBLIC_URL = process.env.PUBLIC_URL || 'https://manhunt.nebendahl.eu';
   const VAPID_SUBJECT = process.env.VAPID_SUBJECT || PUBLIC_URL;
 
@@ -184,12 +185,14 @@ function createSocial(ctx) {
           me.friendOut = [...new Set([...(me.friendOut || []), other.id])];
           other.friendIn = [...new Set([...(other.friendIn || []), me.id])];
           notifyAccount(other.id, { title: 'Freundschaftsanfrage', body: `${me.username} möchte mit dir befreundet sein.`, url: '/profile', tag: 'friend' });
+          mail(other.id, 'friendRequest', { from: me.username });
         }
       } else if (act === 'respond') {
         if (!(me.friendIn || []).includes(other.id)) throw new HttpError(404, 'Keine Anfrage von diesem Spieler');
         if (b.accept) {
           link(me, other);
           notifyAccount(other.id, { title: 'Neue Freundschaft', body: `${me.username} hat deine Anfrage angenommen.`, url: '/profile', tag: 'friend' });
+          mail(other.id, 'friendAccepted', { from: me.username });
         } else {
           me.friendIn = me.friendIn.filter((x) => x !== other.id);
           other.friendOut = (other.friendOut || []).filter((x) => x !== me.id);
@@ -207,6 +210,7 @@ function createSocial(ctx) {
         other.invites = [{ id: Math.random().toString(36).slice(2, 10), from: me.id, fromName: me.username, code: g.code, gameName: g.name, ts: Date.now() },
           ...(other.invites || []).filter((i) => !(i.code === g.code && i.from === me.id))].slice(0, 20);
         notifyAccount(other.id, { title: '🎮 Einladung', body: `${me.username} lädt dich zu „${g.name}“ ein.`, url: `/g/${g.code}`, tag: 'invite', urgent: true });
+        mail(other.id, 'gameInvite', { from: me.username, gameName: g.name, code: g.code });
       } else throw new HttpError(404, 'Unbekannte Aktion');
       save();
       return sendJSON(res, 200, friendsView(me));

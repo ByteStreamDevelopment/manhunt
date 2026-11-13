@@ -38,7 +38,9 @@ const codeFromLog = (email) => {
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(300, 1)]);
 
 console.log('Accounts');
-let r = await api('/api/auth/register', { method: 'POST', body: { username: 'Rita', email: 'rita@example.com', password: 'geheim123' } });
+let r0 = await api('/api/auth/register', { method: 'POST', body: { username: 'Ohne', email: 'ohne@example.com', password: 'geheim123' } });
+ok(r0.status === 400 && r0.needsConsent, 'Registrierung ohne Datenschutz-Bestätigung abgelehnt');
+let r = await api('/api/auth/register', { method: 'POST', body: { username: 'Rita', email: 'rita@example.com', password: 'geheim123', acceptPrivacy: true } });
 ok(r.status === 201 && r.needsVerification, 'Registrierung verlangt Bestätigung');
 r = await api('/api/auth/login', { method: 'POST', body: { login: 'Rita', password: 'geheim123' } });
 ok(r.status === 403 && r.needsVerification, 'Login vor Bestätigung abgelehnt');
@@ -48,9 +50,9 @@ await sleep(200);
 r = await api('/api/auth/verify', { method: 'POST', body: { login: 'rita@example.com', code: codeFromLog('rita@example.com') } });
 ok(r.status === 200 && r.token, 'Bestätigung mit Code aus Mail');
 const RA = r.token;
-r = await api('/api/auth/register', { method: 'POST', body: { username: 'profimpossible', email: 'p@example.com', password: 'geheim123' } });
+r = await api('/api/auth/register', { method: 'POST', body: { username: 'profimpossible', email: 'p@example.com', password: 'geheim123', acceptPrivacy: true } });
 ok(r.status === 403 && r.needsAdminKey, 'Admin-Name ohne Admin-Schlüssel gesperrt');
-r = await api('/api/auth/register', { method: 'POST', body: { username: 'ProfImpossible', email: 'p@example.com', password: 'geheim123', adminKey: 'test' } });
+r = await api('/api/auth/register', { method: 'POST', body: { username: 'ProfImpossible', email: 'p@example.com', password: 'geheim123', adminKey: 'test', acceptPrivacy: true } });
 ok(r.status === 201, 'Admin-Name mit Admin-Schlüssel registrierbar');
 await sleep(200);
 r = await api('/api/auth/verify', { method: 'POST', body: { login: 'p@example.com', code: codeFromLog('p@example.com') } });
@@ -58,7 +60,7 @@ ok(r.account?.isAdmin && r.adminToken, 'ProfImpossible ist Admin');
 const T = r.adminToken;
 const accs = {};
 for (const n of ['Hans', 'Heidi']) {
-  await api('/api/auth/register', { method: 'POST', body: { username: n, email: `${n}@example.com`, password: 'geheim123' } });
+  await api('/api/auth/register', { method: 'POST', body: { username: n, email: `${n}@example.com`, password: 'geheim123', acceptPrivacy: true } });
   await sleep(150);
   const v = await api('/api/auth/verify', { method: 'POST', body: { login: n, code: codeFromLog(`${n.toLowerCase()}@example.com`) } });
   accs[n] = v.token;

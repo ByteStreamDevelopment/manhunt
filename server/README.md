@@ -29,6 +29,21 @@ Keine App nötig. Alle öffnen einfach den Link (`https://manhunt.nebendahl.eu/g
 * **Pickups:** An großen Orten (Supermärkte, Märkte, Bahnhöfe – Daten von OpenStreetMap/Overpass) tauchen Fähigkeiten zum Einsammeln auf, **höchstens eine pro 1 km Umkreis**. Ohne passende Orte werden zufällige Punkte verwendet.
 * **Anti-Cheat:** Die Android-App meldet aktive VPNs und Fake-GPS-Apps. Der Server erkennt außerdem Teleports (unmögliche Geschwindigkeit), Genauigkeit 0 m und exakt gleichbleibende Koordinaten. Pro Spiel: aus / Spielleitung warnen / blockieren. Optional prüft der Server IP-Adressen auf VPN/Proxy (`VPN_CHECK=ipapi`).
 
+## Neu in 2.7: Schönere E-Mails und Datenschutz (DSGVO)
+
+**E-Mails (Issue #13)**
+* Gestaltete HTML-Mails (mit Text-Fassung, ohne externe Bilder oder Tracking) für: Bestätigungscode, Willkommen, Passwort zurücksetzen, Passwort geändert (Sicherheitshinweis), Konto gelöscht, Freundschaftsanfrage, neue Freundschaft, Einladung zu einer Runde, Mit-Spielleitung, Ergebnis nach jeder Runde, Speicher fast voll/voll, Fotos werden bald gelöscht.
+* **Einwilligung:** Benachrichtigungs-Mails (Freunde, Einladungen, Ergebnisse) nur mit Opt-in (Häkchen bei der Registrierung, nicht vorausgewählt) oder in den Einstellungen. Hinweise zu den eigenen Daten sind an, aber abbestellbar. Pflicht-Mails (Bestätigung, Passwort, Sicherheit) kommen immer.
+* Jede Benachrichtigungs-Mail hat einen **Abmeldelink** (einzelne Kategorie oder alle) und die Kopfzeilen `List-Unsubscribe`/`List-Unsubscribe-Post` für die Ein-Klick-Abmeldung im Mailprogramm (RFC 8058). Bremse: dieselbe Mail höchstens alle 10 Minuten, höchstens 15 Benachrichtigungen pro Tag.
+
+**Datenschutz (Issue #14)**
+* **Datenschutzerklärung** (`/datenschutz`) und **Impressum** (`/impressum`), verlinkt auf allen Seiten, in der App und in jeder Mail. Die Betreiber-Angaben kommen aus `OPERATOR_NAME`, `OPERATOR_ADDRESS` (Zeilen mit `|` trennen), `OPERATOR_EMAIL`, `OPERATOR_PHONE` – **bitte setzen**, sonst steht dort ein Hinweis.
+* **Einwilligung bei der Registrierung:** Datenschutzerklärung gelesen und Mindestalter 16 (Art. 8 DSGVO) sind Pflicht, mit Zeitpunkt und Version gespeichert.
+* **Datenauskunft** (Art. 15/20): Profil → „Konto & Datenschutz“ bzw. App → Einstellungen → Datenschutz lädt ein ZIP mit `daten.json` (Konto, Einwilligungen, Statistik, Freunde, Runden mit eigenen Standorten, Chat, Fotos, Vorlagen, Meldungen) und allen eigenen Fotos.
+* **Löschen** (Art. 17): Beim Löschen eines Kontos werden jetzt auch die Standorte, Fotos, Chat- und Sprachnachrichten der Person in allen Runden gelöscht und ihr Name in Ergebnissen durch „Gelöschter Spieler“ ersetzt; Galerie-Fotos der Person werden entfernt. Admins löschen Konten genauso gründlich. Im Web kann man jetzt auch Passwort ändern und das Konto löschen.
+* **Aufbewahrung:** Nach `RETENTION_DAYS` (30) werden neben den Standorten jetzt auch Chat, Sprachnachrichten und private Spielmeldungen beendeter Runden gelöscht. Unbestätigte Konten nach `UNVERIFIED_DAYS` (7) Tagen, erledigte Meldungen nach 90, alle nach 180 Tagen.
+* **Keine Drittanbieter mehr beim Laden der Seite:** Die Kartenbibliothek Leaflet wird jetzt selbst ausgeliefert statt von unpkg.com (Content-Security-Policy entsprechend verschärft). Nur die Kartenkacheln kommen weiterhin von OpenStreetMap; das steht in der Datenschutzerklärung.
+
 ## Neu in 2.6.1: Mit-Spielleitung, Melden, Sperren, Vorlagen, offene Runden
 
 * **Mit-Spielleitung:** Wer eine Runde angelegt hat, ernennt bis zu 5 Mit-Spielleiter (Benutzername). Sie dürfen starten, beenden, Einstellungen ändern, Spieler verwalten und Durchsagen machen – aber die Runde nicht löschen und keine weitere Mit-Spielleitung ernennen.
@@ -164,6 +179,8 @@ Als Dauerdienst siehe `manhunt.service.example` (systemd). Läuft dein Caddy in 
 | `MAX_OPEN_GAMES` | So viele nicht beendete Runden darf ein Account gleichzeitig haben | 3 |
 | `MAX_GAME_HOURS` | Laufende Runden enden spätestens nach so vielen Stunden | 24 |
 | `PHOTO_RETENTION_DAYS` | Fotos/Sprachnachrichten beendeter Runden nach so vielen Tagen löschen (0 = nie) | 30 |
+| `OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_EMAIL`, `OPERATOR_PHONE` | Angaben für Impressum und Datenschutzerklärung (Adresszeilen mit `\|` trennen) | – |
+| `UNVERIFIED_DAYS` | Nicht bestätigte Registrierungen nach so vielen Tagen löschen | 7 |
 | `TRUST_PROXY` | `private`: X-Forwarded-For nur von Proxys im eigenen Netz, `always`, `never` | `private` |
 
 ## Sicherheit und Datenschutz

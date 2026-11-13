@@ -39,6 +39,8 @@ bzw. man aktiviert unter Einstellungen → Apps → Manhunt → „Standardmäß
   (siehe https://dontkillmyapp.com).
 
 ## Funktionen
+- Neu in 2.7: Einwilligung bei der Registrierung (Datenschutz, Mindestalter, freiwillige Mails), Einstellungen → Datenschutz:
+  E-Mail-Benachrichtigungen ein/aus, „Meine Daten herunterladen“ (ZIP), Datenschutzerklärung und Impressum.
 - Neu in 2.6.1: Mit-Spielleitung und Sperrliste („👥 Team“), Fotos und Spieler melden (🚩), Spieler sperren,
   Vorlagen für Einstellungen, „Offene Runden in der Nähe“ auf dem Startbildschirm, Runde öffentlich machen.
 - Neu in 2.6: **Jeder kann eigene Runden erstellen** („➕ Eigene Runde erstellen“ bzw. Kachel „🎮 Meine Runden“).

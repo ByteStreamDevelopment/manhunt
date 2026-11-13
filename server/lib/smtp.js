@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Minimaler SMTP-Client (ohne Abhängigkeiten) für Bestätigungs-Mails.
+ * Minimaler SMTP-Client (ohne Abhängigkeiten). Text- oder Text+HTML-Mails (multipart/alternative).
  * Unterstützt SMTPS (Port 465, SMTP_SECURE=true) und STARTTLS (Port 587), AUTH LOGIN.
  *
  * Umgebungsvariablen: SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM
@@ -25,24 +25,35 @@ function encodeHeader(s) {
   return /^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`;
 }
 
-function buildMessage({ from, to, subject, text }) {
-  const body = Buffer.from(text, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
-  return [
+function b64lines(str) { return Buffer.from(str, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n'); }
+
+/** Mail als Text oder (mit html) als multipart/alternative. headers: zusätzliche Kopfzeilen, z. B. List-Unsubscribe. */
+function buildMessage({ from, to, subject, text, html, headers = {} }) {
+  const head = [
     `From: Manhunt <${from}>`,
     `To: <${to}>`,
     `Subject: ${encodeHeader(subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${crypto.randomBytes(12).toString('hex')}@${from.split('@')[1] || 'manhunt'}>`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: base64',
+    ...Object.entries(headers).filter(([k, v]) => v && !/[\r\n]/.test(k + v)).map(([k, v]) => `${k}: ${v}`),
+  ];
+  if (!html) {
+    return [...head, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '', b64lines(text)].join('\r\n');
+  }
+  const bd = 'mh_' + crypto.randomBytes(12).toString('hex');
+  return [
+    ...head,
+    `Content-Type: multipart/alternative; boundary="${bd}"`,
     '',
-    body,
+    `--${bd}`, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '', b64lines(text),
+    `--${bd}`, 'Content-Type: text/html; charset=utf-8', 'Content-Transfer-Encoding: base64', '', b64lines(html),
+    `--${bd}--`, '',
   ].join('\r\n');
 }
 
 /** Sendet eine Mail. Wirft einen Fehler, wenn der Server ablehnt. */
-function sendMail({ to, subject, text }) {
+function sendMail({ to, subject, text, html, headers }) {
   const c = cfg();
   if (!c.host) {
     console.log(`[manhunt] (kein SMTP konfiguriert) Mail an ${to}: ${subject}\n${text}`);
@@ -96,7 +107,7 @@ function sendMail({ to, subject, text }) {
       await cmd(`MAIL FROM:<${c.from}>`, [250]);
       await cmd(`RCPT TO:<${to}>`, [250, 251]);
       await cmd('DATA', [354]);
-      const msg = buildMessage({ from: c.from, to, subject, text }).replace(/\r\n\./g, '\r\n..');
+      const msg = buildMessage({ from: c.from, to, subject, text, html, headers }).replace(/\r\n\./g, '\r\n..');
       await cmd(`${msg}\r\n.`, [250]);
       await cmd('QUIT', [221]).catch(() => {});
       clearTimeout(timer); sock.end(); resolve({ sent: true });
@@ -104,4 +115,4 @@ function sendMail({ to, subject, text }) {
   });
 }
 
-module.exports = { sendMail, enabled };
+module.exports = { sendMail, enabled, buildMessage };

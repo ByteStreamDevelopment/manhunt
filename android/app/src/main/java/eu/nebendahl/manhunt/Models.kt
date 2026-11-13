@@ -247,6 +247,21 @@ fun parsePublicGames(j: JSONObject): List<PublicGame> = j.getJSONArray("games").
     )
 }
 
+/** E-Mail-Einstellungen: Kategorie -> an/aus, dazu die Beschriftungen vom Server */
+data class MailPrefs(val values: Map<String, Boolean>, val labels: Map<String, String>, val mailConfigured: Boolean = true)
+fun parseMailPrefs(j: JSONObject): MailPrefs {
+    val v = j.getJSONObject("mailPrefs")
+    val l = j.optJSONObject("categories")
+    val order = listOf("friends", "invites", "games", "account")
+    val keys = (l?.keys()?.asSequence()?.toList() ?: v.keys().asSequence().toList())
+        .sortedBy { order.indexOf(it).let { i -> if (i < 0) order.size else i } }
+    return MailPrefs(
+        keys.associateWith { v.optBoolean(it) },
+        keys.associateWith { l?.optString(it) ?: it },
+        j.optBoolean("mailConfigured", true),
+    )
+}
+
 /** Gespeichertes Regelwerk */
 data class GameTemplate(val id: String, val name: String)
 fun parseTemplates(j: JSONObject): List<GameTemplate> = j.getJSONArray("templates").objects().map { GameTemplate(it.getString("id"), it.optString("name")) }
