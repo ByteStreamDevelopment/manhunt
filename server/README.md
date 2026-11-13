@@ -143,7 +143,7 @@ Der Linux-VPS ist die bessere Wahl: läuft dauerhaft, Caddy ist dort schon einge
 
 ```bash
 cp .env.example .env        # ADMIN_PASSWORD setzen
-nano docker-compose.yml     # Netzwerkname "caddy" auf den deines Caddy-Containers ändern
+nano .env                   # ggf. CADDY_NETWORK=<Netzwerk deines Caddy-Containers> (Standard: caddy)
 docker compose up -d --build
 ```
 

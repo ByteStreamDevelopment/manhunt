@@ -30,7 +30,9 @@ services:
 networks:
   caddy:
     external: true
-    name: caddy   # <- Name des Docker-Netzwerks, in dem dein Caddy-Container hängt
+    # Name des Docker-Netzwerks, in dem dein Caddy-Container hängt – in der .env als CADDY_NETWORK setzen,
+    # nicht hier ändern (sonst blockiert die Änderung jedes "git pull")
+    name: ${CADDY_NETWORK:-caddy}
 
 volumes:
   manhunt-data:
